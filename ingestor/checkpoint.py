@@ -41,11 +41,11 @@ class Checkpoint:
             events_confirmed=count if isinstance(count, int) else 0,
         )
 
-    def advance(self, event_id: Optional[str]) -> None:
-        """Record a confirmed event in memory. Call save() to make it durable."""
+    def advance(self, event_id: Optional[str], count: int = 1) -> None:
+        """Record confirmed events in memory. Call save() to make it durable."""
         if event_id:
             self.last_event_id = event_id
-        self.events_confirmed += 1
+        self.events_confirmed += count
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

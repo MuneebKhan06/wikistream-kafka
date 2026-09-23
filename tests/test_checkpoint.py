@@ -43,3 +43,10 @@ def test_save_leaves_no_temp_files_behind(tmp_path):
 
     assert json.loads(path.read_text())["last_event_id"] == "id-2"
     assert [p.name for p in tmp_path.iterdir()] == ["ingestor.json"]
+
+
+def test_advance_can_cover_several_events(tmp_path):
+    cp = Checkpoint(path=tmp_path / "c.json")
+    cp.advance("id-3", count=3)
+    assert cp.last_event_id == "id-3"
+    assert cp.events_confirmed == 3
