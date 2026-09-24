@@ -80,3 +80,10 @@ def test_message_timestamp_is_used_when_event_time_is_unusable():
     del raw["timestamp"]
     result = transform(json.dumps(raw).encode(), cache, message_time_ms=1)
     assert isinstance(result, Rejected)
+
+
+def test_transactional_id_is_per_instance():
+    from processors.cleaner import transactional_id
+
+    assert transactional_id("1") == "cleaner-1"
+    assert transactional_id("2") != transactional_id("1")

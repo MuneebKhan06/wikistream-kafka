@@ -1,5 +1,9 @@
 """Reads wiki.raw, deduplicates and cleans, writes wiki.clean.
 
+Each instance needs its own transactional id: Kafka fences a transactional
+id to one producer at a time, so a second instance reusing it would kill
+the first. Set CLEANER_INSTANCE or pass it as the first argument.
+
 Output messages and the input offsets are committed in one Kafka
 transaction, so a crash mid batch leaves neither half behind: the
 transaction is aborted, read_committed consumers never see its output, and
@@ -10,6 +14,7 @@ another instance takes its state with it, so revoked partitions are cleared
 on rebalance rather than kept around stale.
 """
 
+import os
 import signal
 import sys
 import time
@@ -33,15 +38,20 @@ from processors.transform import Clean, Duplicate, Rejected, transform  # noqa: 
 log = setup_logging("cleaner")
 
 GROUP_ID = "cleaner"
-TRANSACTIONAL_ID = "cleaner-1"
+INSTANCE = os.getenv("CLEANER_INSTANCE", "1")
 COMMIT_INTERVAL_SEC = 0.5
 MAX_BATCH = 2000
 LAG_INTERVAL_SEC = 30.0
 
 
+def transactional_id(instance: str) -> str:
+    return f"cleaner-{instance}"
+
+
 class Cleaner:
-    def __init__(self, transactional_id: str = TRANSACTIONAL_ID):
-        self.producer = Producer(transactional_producer_config(transactional_id))
+    def __init__(self, instance: str = INSTANCE):
+        self.transactional_id = transactional_id(instance)
+        self.producer = Producer(transactional_producer_config(self.transactional_id))
         self.consumer = Consumer(consumer_config(GROUP_ID))
         self.caches = {}
         self.meter = RateMeter(log, "clean")
@@ -157,7 +167,7 @@ class Cleaner:
         self.consumer.subscribe(
             [TOPIC_RAW], on_assign=self.on_assign, on_revoke=self.on_revoke
         )
-        log.info("cleaner started, transactional id %s", TRANSACTIONAL_ID)
+        log.info("cleaner started, transactional id %s", self.transactional_id)
 
         while self.running:
             batch = self.collect_batch()
@@ -181,7 +191,8 @@ class Cleaner:
 
 
 def main() -> None:
-    cleaner = Cleaner()
+    instance = sys.argv[1] if len(sys.argv) > 1 else INSTANCE
+    cleaner = Cleaner(instance)
     signal.signal(signal.SIGINT, cleaner.stop)
     signal.signal(signal.SIGTERM, cleaner.stop)
     cleaner.run()
