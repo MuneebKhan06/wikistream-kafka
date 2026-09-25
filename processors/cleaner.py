@@ -34,6 +34,7 @@ from common.config import (  # noqa: E402
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from processors.dedup import DedupCache  # noqa: E402
 from processors.transform import Clean, Duplicate, Rejected, transform  # noqa: E402
+from processors.warmup import CacheWarmer  # noqa: E402
 
 log = setup_logging("cleaner")
 
@@ -49,10 +50,11 @@ def transactional_id(instance: str) -> str:
 
 
 class Cleaner:
-    def __init__(self, instance: str = INSTANCE):
+    def __init__(self, instance: str = INSTANCE, warmer: CacheWarmer = None):
         self.transactional_id = transactional_id(instance)
         self.producer = Producer(transactional_producer_config(self.transactional_id))
         self.consumer = Consumer(consumer_config(GROUP_ID))
+        self.warmer = warmer if warmer is not None else CacheWarmer()
         self.caches = {}
         self.meter = RateMeter(log, "clean")
         self.running = True
@@ -68,9 +70,41 @@ class Cleaner:
 
     def on_assign(self, consumer, partitions):
         consumer.incremental_assign(partitions)
-        for tp in partitions:
-            self.caches.setdefault(tp.partition, DedupCache())
         log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
+        self.warm(consumer, partitions)
+
+    def warm(self, consumer, partitions) -> None:
+        """Rebuild dedup state for new partitions before processing them.
+
+        The replay stops at each partition's committed offset, which is also
+        where processing resumes, so events the group has not yet committed
+        stay unknown to the cache and are cleaned normally.
+        """
+        if not partitions:
+            return
+        committed = {
+            tp.partition: tp.offset
+            for tp in consumer.committed(list(partitions), timeout=30)
+        }
+        for tp in partitions:
+            cache = self.caches.setdefault(tp.partition, DedupCache())
+            offset = committed.get(tp.partition, -1)
+            if offset is None or offset < 0:
+                log.info(
+                    "partition %d has no committed offset, skipping warmup",
+                    tp.partition,
+                )
+                continue
+            result = self.warmer.warm(tp.partition, cache, offset)
+            if result.replayed:
+                log.info(
+                    "warmed partition %d with %d ids from offsets %d to %d in %.1fs",
+                    tp.partition,
+                    result.loaded,
+                    result.from_offset,
+                    result.until_offset - 1,
+                    result.seconds,
+                )
 
     def on_revoke(self, consumer, partitions):
         """A revoked partition may be processed elsewhere, so drop its state."""
