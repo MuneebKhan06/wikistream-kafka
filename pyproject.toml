@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["integration: needs a running Postgres or Kafka"]
 
 [tool.ruff]
 line-length = 100
