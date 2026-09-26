@@ -53,6 +53,9 @@ class PartitionState:
     windows: Dict[WindowKey, Window] = field(default_factory=dict)
     last_offset: int = -1
     flushed_minutes: set = field(default_factory=set)
+    # Lowest offset behind a partial total written by a final flush. The
+    # commit point must never pass it, or that total stays partial forever.
+    partial_floor: int = -1
 
 
 def minute_start(event_time_ms: int) -> int:
@@ -108,17 +111,31 @@ class MinuteWindows:
         """Minutes starting before this are finished, given the lateness allowance."""
         return minute_start(self.watermark_ms - self.lateness_ms)
 
-    def pop_closed(self) -> list:
-        """Remove and return every window the stream has moved past."""
+    def pop_closed(self, final: bool = False) -> list:
+        """Remove and return every window the stream has moved past.
+
+        With final=True every window is returned, open ones included. That is
+        safe because a write keeps the larger total for a minute, so the
+        partial count written here is replaced by the complete count when the
+        next owner replays those events from the committed offset.
+        """
         cutoff = self.closed_before()
         closed = []
         for state in self.partitions.values():
-            done = [key for key in state.windows if key[2] < cutoff]
+            done = [
+                key for key in state.windows if final or key[2] < cutoff
+            ]
             for key in done:
                 wiki, title, minute = key
                 window = state.windows.pop(key)
                 state.flushed_minutes.add(minute)
                 closed.append(ClosedWindow(wiki, title, minute, window.count))
+                if final and minute >= cutoff:
+                    state.partial_floor = (
+                        window.first_offset
+                        if state.partial_floor < 0
+                        else min(state.partial_floor, window.first_offset)
+                    )
         self._trim_flushed(cutoff)
         return closed
 
@@ -132,9 +149,14 @@ class MinuteWindows:
         offsets = {}
         for partition, state in self.partitions.items():
             if state.windows:
-                offsets[partition] = min(w.first_offset for w in state.windows.values())
+                offset = min(w.first_offset for w in state.windows.values())
             elif state.last_offset >= 0:
-                offsets[partition] = state.last_offset + 1
+                offset = state.last_offset + 1
+            else:
+                continue
+            if state.partial_floor >= 0:
+                offset = min(offset, state.partial_floor)
+            offsets[partition] = offset
         return offsets
 
     def open_windows(self, partition: Optional[int] = None) -> int:

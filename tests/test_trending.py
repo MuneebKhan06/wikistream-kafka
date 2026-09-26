@@ -118,3 +118,37 @@ def test_stats_report_progress():
     assert stats["counted"] == 1
     assert stats["open_windows"] == 1
     assert stats["watermark_ms"] == BASE
+
+
+def test_final_flush_returns_open_windows_too():
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    add(windows, 0, minute=0)
+    add(windows, 1, minute=5, title="Other")
+
+    assert len(windows.pop_closed()) == 1
+    assert windows.open_windows() == 1
+    closed = windows.pop_closed(final=True)
+    assert [(c.title, c.count) for c in closed] == [("Other", 1)]
+    assert windows.open_windows() == 0
+
+
+def test_final_flush_does_not_advance_commit_offsets_past_open_windows():
+    """A partial total is written, so its events must still be re-read."""
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    add(windows, 42, minute=0)
+    assert windows.commit_offsets() == {0: 42}
+
+    windows.pop_closed(final=True)
+    assert windows.commit_offsets() == {0: 42}
+
+
+def test_final_flush_of_a_closed_window_still_advances_the_commit():
+    """A window past the cutoff is complete, so nothing has to be re-read."""
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    add(windows, 7, minute=0)
+    add(windows, 8, minute=9, title="Other")
+    windows.pop_closed()
+    assert windows.commit_offsets() == {0: 8}
+
+    windows.pop_closed(final=True)
+    assert windows.commit_offsets() == {0: 8}
