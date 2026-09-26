@@ -26,11 +26,18 @@ INSERT_EDITS = """
     ON CONFLICT (event_id) DO NOTHING
 """
 
+# Trending writes are totals for a minute, not increments, because a restart
+# recomputes every open window from the committed offset and writes it again.
+# A recount can only ever see the same events or fewer, never more, so taking
+# the greater of the two values makes the write safe to repeat: a partial
+# recount cannot lower a total that was already complete.
 UPSERT_TRENDING = """
     INSERT INTO trending_minutes (wiki, title, minute, edit_count)
     VALUES %s
     ON CONFLICT (wiki, title, minute)
-    DO UPDATE SET edit_count = trending_minutes.edit_count + EXCLUDED.edit_count
+    DO UPDATE SET edit_count = GREATEST(
+        trending_minutes.edit_count, EXCLUDED.edit_count
+    )
 """
 
 
@@ -79,7 +86,7 @@ def insert_edits(connection, events: Iterable[CleanEvent]) -> int:
 
 
 def upsert_trending(connection, counts: Sequence[tuple]) -> int:
-    """Add per minute counts, summing into any row already there."""
+    """Write per minute totals, keeping the larger value on conflict."""
     if not counts:
         return 0
     with cursor(connection) as cur:

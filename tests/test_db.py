@@ -65,3 +65,34 @@ def test_insert_is_idempotent(connection):
         with connection.cursor() as cur:
             cur.execute("DELETE FROM edits WHERE event_id = 'test-idem-1'")
         connection.commit()
+
+
+@pytest.mark.integration
+def test_trending_write_keeps_the_larger_total(connection):
+    """A replay recomputes a window and must not lower a complete total."""
+    row = ("testwiki", "Replay Page", "2026-09-26T10:00:00+00:00")
+    try:
+        assert upsert_trending(connection, [row + (10,)]) == 1
+        # A partial recount after a restart sees fewer events.
+        upsert_trending(connection, [row + (4,)])
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT edit_count FROM trending_minutes "
+                "WHERE wiki = %s AND title = %s",
+                row[:2],
+            )
+            assert cur.fetchone()[0] == 10
+
+        # A later, more complete count does raise it.
+        upsert_trending(connection, [row + (17,)])
+        with connection.cursor() as cur:
+            cur.execute(
+                "SELECT edit_count FROM trending_minutes "
+                "WHERE wiki = %s AND title = %s",
+                row[:2],
+            )
+            assert cur.fetchone()[0] == 17
+    finally:
+        with connection.cursor() as cur:
+            cur.execute("DELETE FROM trending_minutes WHERE wiki = 'testwiki'")
+        connection.commit()
