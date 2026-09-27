@@ -26,6 +26,7 @@ from common.config import (  # noqa: E402
     WIKI_STREAM_URL,
     producer_config,
 )
+from common.dlq import dlq_record  # noqa: E402
 from common.metrics import RateMeter, setup_logging  # noqa: E402
 from common.models import ParseError, event_id_of, parse_raw  # noqa: E402
 from ingestor.checkpoint import DEFAULT_PATH, Checkpoint  # noqa: E402
@@ -129,7 +130,10 @@ class Ingestor:
         except ParseError as exc:
             log.warning("unparseable event sent to dlq: %s", exc)
             self.meter.mark_error()
-            self._send(TOPIC_DLQ, None, event.data, event.event_id)
+            record = dlq_record(
+                "ingestor", str(exc), event.data, WIKI_STREAM_URL, stream_id=event.event_id
+            )
+            self._send(TOPIC_DLQ, None, record.decode("utf-8"), event.event_id)
             return
         self._send(TOPIC_RAW, key, json.dumps(raw, ensure_ascii=False), event.event_id)
 

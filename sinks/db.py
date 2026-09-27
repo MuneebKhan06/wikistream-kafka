@@ -41,6 +41,15 @@ UPSERT_TRENDING = """
 """
 
 
+INSERT_ALERTS = """
+    INSERT INTO alerts (
+        alert_id, wiki, title, revert_count, users, window_start, window_end
+    )
+    VALUES %s
+    ON CONFLICT (alert_id) DO NOTHING
+"""
+
+
 def connect(dsn: str = None):
     connection = psycopg2.connect(dsn or POSTGRES.dsn())
     connection.autocommit = False
@@ -82,6 +91,28 @@ def insert_edits(connection, events: Iterable[CleanEvent]) -> int:
         return 0
     with cursor(connection) as cur:
         execute_values(cur, INSERT_EDITS, rows, page_size=500)
+        return cur.rowcount
+
+
+def insert_alerts(connection, alerts) -> int:
+    """Insert edit war alerts. The id is derived from the war, so a re-detected
+    war after a replay maps to the same row and is skipped."""
+    rows = [
+        (
+            alert.alert_id,
+            alert.wiki,
+            alert.title,
+            alert.revert_count,
+            list(alert.users),
+            alert.window_start,
+            alert.window_end,
+        )
+        for alert in alerts
+    ]
+    if not rows:
+        return 0
+    with cursor(connection) as cur:
+        execute_values(cur, INSERT_ALERTS, rows, page_size=500)
         return cur.rowcount
 
 

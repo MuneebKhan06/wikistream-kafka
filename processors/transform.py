@@ -4,11 +4,11 @@ Kept free of Kafka clients so the decision logic can be tested directly:
 every raw message becomes exactly one Clean, Duplicate or Rejected result.
 """
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Union
 
+from common.dlq import dlq_record
 from common.models import CleanEvent, ParseError, clean_event, parse_raw
 from processors.dedup import DedupCache
 
@@ -34,20 +34,14 @@ class Rejected:
 
     def envelope(self, source_topic: str, partition: int, offset: int) -> bytes:
         """Wraps the bad payload with enough context to investigate later."""
-        try:
-            original = self.payload.decode("utf-8")
-        except UnicodeDecodeError:
-            original = repr(self.payload)
-        return json.dumps(
-            {
-                "reason": self.reason,
-                "source_topic": source_topic,
-                "partition": partition,
-                "offset": offset,
-                "payload": original,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
+        return dlq_record(
+            "cleaner",
+            self.reason,
+            self.payload,
+            source_topic,
+            partition=partition,
+            offset=offset,
+        )
 
 
 Outcome = Union[Clean, Duplicate, Rejected]

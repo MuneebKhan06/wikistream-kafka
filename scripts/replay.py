@@ -22,13 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from confluent_kafka import Producer  # noqa: E402
 
-from common.config import TOPIC_RAW, producer_config  # noqa: E402
+from common.config import SAMPLES_DIR, TOPIC_RAW, producer_config  # noqa: E402
 from common.metrics import RateMeter, setup_logging  # noqa: E402
 from common.models import ParseError, event_id_of, parse_raw  # noqa: E402
 
 log = setup_logging("replay")
 
-DEFAULT_SAMPLE = Path("samples/recentchange_sample.jsonl")
+DEFAULT_SAMPLE = SAMPLES_DIR / "recentchange_sample.jsonl"
 
 
 def load(path: Path) -> list:

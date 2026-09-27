@@ -37,6 +37,7 @@ class FakeConsumer:
         self.low = low
         self.time_offset = time_offset
         self.assigned_from = None
+        self.asked_cutoff = None
         self.closed = False
         self._queue = []
 
@@ -46,6 +47,7 @@ class FakeConsumer:
 
     def offsets_for_times(self, partitions, timeout=None):
         tp = partitions[0]
+        self.asked_cutoff = tp.offset
         tp.offset = self.time_offset
         return [tp]
 
@@ -132,3 +134,21 @@ def test_unparseable_records_are_counted_but_do_not_stop_the_replay():
     result = warmer_for(FakeConsumer(messages)).warm(0, DedupCache(), until_offset=3)
     assert result.loaded == 2
     assert result.skipped == 1
+
+
+def test_window_is_measured_back_from_the_last_committed_record():
+    """A consumer catching up on backlog needs history behind its position."""
+    hours_ago = BASE - 5 * 3600_000
+    messages = [FakeMessage(i, f"id-{i}", timestamp=hours_ago + i) for i in range(10)]
+    consumer = FakeConsumer(messages)
+    warmer_for(consumer, window_ms=60_000).warm(0, DedupCache(), until_offset=10)
+    # The last committed record is offset 9, so the window ends at its time.
+    assert consumer.asked_cutoff == hours_ago + 9 - 60_000
+
+
+def test_nothing_is_replayed_when_no_record_is_inside_the_window():
+    messages = [FakeMessage(i, f"id-{i}") for i in range(10)]
+    consumer = FakeConsumer(messages, time_offset=-1)
+    result = warmer_for(consumer).warm(0, DedupCache(), until_offset=10)
+    assert result.replayed == 0
+    assert result.from_offset == -1

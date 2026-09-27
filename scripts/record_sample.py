@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.config import WIKI_STREAM_URL  # noqa: E402
+from common.config import SAMPLES_DIR, WIKI_STREAM_URL  # noqa: E402
 from common.metrics import setup_logging  # noqa: E402
 from common.models import ParseError, clean_event, parse_raw  # noqa: E402
 from ingestor.sse import stream_events  # noqa: E402
@@ -17,7 +17,7 @@ from ingestor.sse import stream_events  # noqa: E402
 log = setup_logging("record-sample")
 
 DEFAULT_COUNT = 2000
-DEFAULT_OUTPUT = Path("samples/recentchange_sample.jsonl")
+DEFAULT_OUTPUT = SAMPLES_DIR / "recentchange_sample.jsonl"
 
 
 def record(count: int, output: Path) -> dict:
