@@ -97,3 +97,47 @@ def test_json_round_trip():
     event = clean_event(make_raw(title="Zollingerdächer"))
     assert CleanEvent.from_json(event.to_json()) == event
     assert "Zollingerdächer" in json.loads(event.to_json())["title"]
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "/* undo:0||2270894751|Saroj */",
+        "Änderung 258123456 von Beispiel rückgängig gemacht; Link-Spam entfernt",
+        "Die letzte Textänderung von 1.2.3.4 wurde verworfen und die Version 99 wiederhergestellt",
+        "Revertida una edición de X (disc.) a la última edición de Nuria",
+        "Deshecha la edición 1234 de X (disc.)",
+        "Foi revertida a edição de X para a última revisão de Y",
+        "Annulation de la [[Spécial:Diff/1|modification]] de [[Spécial:Contributions/X|X]]",
+        "Révocation des modifications de X",
+        "Annullata la modifica di X (discussione), riportata alla versione precedente",
+        "Versie 123 van X (overleg) ongedaan gemaakt.",
+        "Wycofano edycję użytkownika X (dyskusja). Autor przywróconej wersji to Y.",
+        "editace uživatele X (diskuse) vráceny do předchozího stavu",
+        "автоматическая отмена правки участника X - R:NB LWA: 0.9",
+        "回退X（讨论）做出的1次編輯",
+        "撤销X（讨论）的修订版本123",
+    ],
+)
+def test_reverts_are_detected_in_many_languages(comment):
+    assert clean_event(make_raw(comment=comment)).is_revert is True
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        # A bot updating a report page that lists reverts is not a revert.
+        "Отчёт об автоматических отменах",
+        # A talk page notice telling a user they were reverted is not either.
+        "Правка с вашего IP-адреса в статье X была автоматически отменена",
+        "Neuer Abschnitt über Geschichte",
+        "Ajout de références",
+    ],
+)
+def test_text_about_reverts_is_not_a_revert(comment):
+    assert clean_event(make_raw(comment=comment)).is_revert is False
+
+
+def test_only_edits_count_as_reverts():
+    event = clean_event(make_raw(type="log", comment="Reverted edits by X"))
+    assert event.is_revert is False

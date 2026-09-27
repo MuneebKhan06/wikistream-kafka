@@ -8,10 +8,35 @@ from typing import Optional
 
 EVENT_TYPES = {"edit", "new", "log", "categorize"}
 
+# MediaWiki writes revert summaries in the wiki's own language, so matching
+# English alone misses most reverts on a global stream. These are the
+# automatic summaries seen in real traffic. Phrases are kept specific so
+# pages *about* reverts do not match: a Russian report titled "report on
+# automatic reverts" or a talk page notice saying "your edit was reverted"
+# is not itself a revert.
+REVERT_PHRASES = {
+    "en": r"(?:^|\W)(?:revert(?:ed|ing)?|undid revision|undo|rv[tv]?|rollback)(?:\W|$)",
+    "wikidata": r"/\* (?:undo|restore):",
+    "de": r"rückgängig gemacht|\bwurde verworfen\b",
+    "es_pt": r"\brevertid[oa]s?\b|\bdeshecha la edici[oó]n|\bdesfeita a edi[cç][aã]o",
+    "fr": r"\br[ée]vocation des modifications|\bannulation de la (?:\[\[[^\]|]*\|)?modification",
+    "it": r"\bannullat[ae] l[ae] modific",
+    "nl": r"\bongedaan gemaakt\b",
+    "pl": r"\bwycofano (?:edycj|ostatni)|\banulowanie wersji",
+    "cs": r"vr[aá]cen[ya]? do předchozího stavu",
+    "ru": r"\bотмена правки\b|\bоткат правок\b",
+    "zh": r"回退|撤销|撤銷|還原|还原",
+    "ja": r"取り消し|巻き戻し",
+}
+
 REVERT_PATTERNS = re.compile(
-    r"(^|\W)(revert(ed|ing)?|undid revision|undo|rv[tv]?|rollback)(\W|$)",
+    "|".join(f"(?:{pattern})" for pattern in REVERT_PHRASES.values()),
     re.IGNORECASE,
 )
+
+
+def is_revert_comment(comment: str) -> bool:
+    return bool(REVERT_PATTERNS.search(comment or ""))
 
 
 class ParseError(ValueError):
@@ -42,7 +67,7 @@ class CleanEvent:
 
     @property
     def is_revert(self) -> bool:
-        return self.type == "edit" and bool(REVERT_PATTERNS.search(self.comment))
+        return self.type == "edit" and is_revert_comment(self.comment)
 
     @property
     def size_delta(self) -> Optional[int]:
