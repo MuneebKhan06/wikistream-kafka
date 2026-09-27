@@ -75,3 +75,11 @@ def test_acks_override_disables_idempotence():
     assert producer_overrides(None) == {}
     assert producer_overrides("all") == {}
     assert producer_overrides("1") == {"acks": "1", "enable.idempotence": False}
+
+
+def test_default_sample_is_found_from_any_directory(tmp_path, monkeypatch):
+    from scripts.replay import DEFAULT_SAMPLE
+
+    monkeypatch.chdir(tmp_path)
+    assert DEFAULT_SAMPLE.is_absolute()
+    assert DEFAULT_SAMPLE.exists()

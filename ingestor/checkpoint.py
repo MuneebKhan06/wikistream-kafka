@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_PATH = Path(os.getenv("INGESTOR_CHECKPOINT", "state/ingestor.json"))
+from common.config import STATE_DIR
+
+DEFAULT_PATH = Path(os.getenv("INGESTOR_CHECKPOINT", str(STATE_DIR / "ingestor.json")))
 
 
 @dataclass

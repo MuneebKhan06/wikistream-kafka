@@ -2,10 +2,17 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Paths are anchored here rather than to the working directory, so a process
+# started by a service manager or cron from elsewhere still finds its state.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STATE_DIR = PROJECT_ROOT / "state"
+SAMPLES_DIR = PROJECT_ROOT / "samples"
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 BOOTSTRAP_SERVERS = os.getenv(
     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092,localhost:9094,localhost:9096"

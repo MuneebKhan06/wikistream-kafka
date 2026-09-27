@@ -50,3 +50,16 @@ def test_advance_can_cover_several_events(tmp_path):
     cp.advance("id-3", count=3)
     assert cp.last_event_id == "id-3"
     assert cp.events_confirmed == 3
+
+
+def test_default_checkpoint_does_not_depend_on_working_directory(tmp_path, monkeypatch):
+    import importlib
+
+    import ingestor.checkpoint as checkpoint
+    from common.config import PROJECT_ROOT
+
+    monkeypatch.delenv("INGESTOR_CHECKPOINT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    reloaded = importlib.reload(checkpoint)
+    assert reloaded.DEFAULT_PATH.is_absolute()
+    assert reloaded.DEFAULT_PATH == PROJECT_ROOT / "state" / "ingestor.json"
