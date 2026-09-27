@@ -96,3 +96,41 @@ def test_trending_write_keeps_the_larger_total(connection):
         with connection.cursor() as cur:
             cur.execute("DELETE FROM trending_minutes WHERE wiki = 'testwiki'")
         connection.commit()
+
+
+def make_alert(alert_id="test-alert-1"):
+    from processors.edit_war_detector import EditWarAlert
+
+    return EditWarAlert(
+        alert_id=alert_id,
+        wiki="testwiki",
+        title="Contested Page",
+        revert_count=3,
+        users=("Alice", "Bob"),
+        event_ids=("a", "b", "c"),
+        window_start="2026-09-27T10:00:00+00:00",
+        window_end="2026-09-27T10:05:00+00:00",
+    )
+
+
+def test_empty_alert_batch_touches_no_connection():
+    from sinks.db import insert_alerts
+
+    assert insert_alerts(None, []) == 0
+
+
+@pytest.mark.integration
+def test_alert_insert_is_idempotent(connection):
+    from sinks.db import insert_alerts
+
+    alert = make_alert()
+    try:
+        assert insert_alerts(connection, [alert]) == 1
+        assert insert_alerts(connection, [alert]) == 0
+        with connection.cursor() as cur:
+            cur.execute("SELECT users FROM alerts WHERE alert_id = %s", (alert.alert_id,))
+            assert cur.fetchone()[0] == ["Alice", "Bob"]
+    finally:
+        with connection.cursor() as cur:
+            cur.execute("DELETE FROM alerts WHERE wiki = 'testwiki'")
+        connection.commit()

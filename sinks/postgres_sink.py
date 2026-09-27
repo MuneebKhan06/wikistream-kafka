@@ -10,6 +10,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,10 +30,27 @@ LAG_INTERVAL_SEC = 30.0
 
 
 class PostgresSink:
-    def __init__(self):
-        self.consumer = Consumer(consumer_config(GROUP_ID))
+    """Topic to table: decode a batch, write it, then commit its offsets.
+
+    Parameterised so every table shares the same rows first, offsets second
+    ordering. `write` must be idempotent and return the rows it inserted.
+    """
+
+    def __init__(
+        self,
+        topic: str = TOPIC_CLEAN,
+        group_id: str = GROUP_ID,
+        decode: Callable = CleanEvent.from_json,
+        write: Callable = insert_edits,
+        label: str = "sink",
+    ):
+        self.topic = topic
+        self.group_id = group_id
+        self.decode = decode
+        self.write = write
+        self.consumer = Consumer(consumer_config(group_id))
         self.connection = wait_for_database(log=log)
-        self.meter = RateMeter(log, "sink")
+        self.meter = RateMeter(log, label)
         self.running = True
         self.inserted = 0
         self.skipped = 0
@@ -72,8 +90,8 @@ class PostgresSink:
         events = []
         for msg in batch:
             try:
-                events.append(CleanEvent.from_json(msg.value()))
-            except (ValueError, TypeError) as exc:
+                events.append(self.decode(msg.value()))
+            except (ValueError, TypeError, KeyError) as exc:
                 self.meter.mark_error()
                 log.error(
                     "unreadable record at %s[%d]@%d: %s",
@@ -83,7 +101,7 @@ class PostgresSink:
                     exc,
                 )
 
-        written = insert_edits(self.connection, events)
+        written = self.write(self.connection, events)
         self.inserted += written
         self.skipped += len(events) - written
         self.meter.mark(len(events))
@@ -97,9 +115,9 @@ class PostgresSink:
 
     def run(self) -> None:
         self.consumer.subscribe(
-            [TOPIC_CLEAN], on_assign=self.on_assign, on_revoke=self.on_revoke
+            [self.topic], on_assign=self.on_assign, on_revoke=self.on_revoke
         )
-        log.info("postgres sink started, group %s", GROUP_ID)
+        log.info("postgres sink started, %s into group %s", self.topic, self.group_id)
 
         while self.running:
             batch = self.collect_batch()
