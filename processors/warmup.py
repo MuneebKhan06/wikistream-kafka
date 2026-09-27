@@ -1,18 +1,20 @@
-"""Rebuilds dedup state for a partition by replaying its recent history.
+"""Rebuilds in memory state for a partition by replaying its recent history.
 
-The dedup cache lives in memory, so a restarting cleaner starts blind and
-cannot recognise source duplicates of events its predecessor already
-handled. Before processing a newly assigned partition, the cleaner replays
-the recent history of that same wiki.raw partition and loads the ids.
-
-Replaying the input topic works because wiki.raw is keyed by event id, so
-every copy of an event is on the same partition as its original. Nothing is
-produced and no offsets are committed: this only fills memory.
+Stateful consumers keep their state in memory, so a restarting instance
+starts blind. Before processing a newly assigned partition, it replays the
+recent history of that partition and feeds it back into its state. Nothing
+is produced and no offsets are committed: this only fills memory.
 
 The replay stops at the committed offset, never at the end of the
 partition. Records past the commit point were either never processed or
-belonged to an aborted transaction, so they are not in wiki.clean. Loading
-their ids would make the cleaner drop them as duplicates and lose them.
+belonged to an aborted transaction. Loading them would make the consumer
+believe it had already handled them. For the cleaner that means dropping
+them as duplicates and losing them.
+
+The window is measured back from the time of the last committed record,
+not from the wall clock. A consumer catching up on hours of backlog needs
+the history just behind its own position, which a wall clock cutoff would
+skip entirely.
 """
 
 import time
@@ -43,20 +45,25 @@ class WarmupResult:
         return self.loaded + self.skipped
 
 
-def default_consumer_factory() -> Consumer:
-    return Consumer(
-        consumer_config(
-            "cleaner-warmup",
-            **{"group.id": "cleaner-warmup", "enable.partition.eof": True},
+def consumer_factory_for(group_id: str) -> Callable[[], Consumer]:
+    def factory() -> Consumer:
+        return Consumer(
+            consumer_config(group_id, **{"group.id": group_id, "enable.partition.eof": True})
         )
-    )
+
+    return factory
 
 
-class CacheWarmer:
+default_consumer_factory = consumer_factory_for("cleaner-warmup")
+
+
+class PartitionReplayer:
+    """Reads [window start, until_offset) of one partition into a callback."""
+
     def __init__(
         self,
-        topic: str = TOPIC_RAW,
-        window_ms: int = HOUR_MS,
+        topic: str,
+        window_ms: int,
         max_records: int = MAX_RECORDS,
         consumer_factory: Callable[[], Consumer] = default_consumer_factory,
         now_ms: Callable[[], int] = lambda: int(time.time() * 1000),
@@ -66,6 +73,16 @@ class CacheWarmer:
         self.max_records = max_records
         self.consumer_factory = consumer_factory
         self.now_ms = now_ms
+
+    def anchor_time(self, consumer: Consumer, partition: int, until_offset: int) -> int:
+        """Timestamp of the last committed record, where the window ends."""
+        consumer.assign([TopicPartition(self.topic, partition, until_offset - 1)])
+        msg = consumer.poll(POLL_TIMEOUT_SEC)
+        if msg is not None and not msg.error():
+            _, timestamp = msg.timestamp()
+            if timestamp > 0:
+                return timestamp
+        return self.now_ms()
 
     def start_offset(
         self, consumer: Consumer, partition: int, until_offset: int
@@ -77,16 +94,20 @@ class CacheWarmer:
         if until_offset <= low:
             return None
 
-        cutoff = self.now_ms() - self.window_ms
+        cutoff = self.anchor_time(consumer, partition, until_offset) - self.window_ms
         found = consumer.offsets_for_times(
             [TopicPartition(self.topic, partition, cutoff)], timeout=10
         )[0]
-        start = low if found.offset < 0 else max(found.offset, low)
-        start = max(start, until_offset - self.max_records)
+        if found.offset < 0:
+            # No record is newer than the cutoff, so nothing is in the window.
+            return None
+        start = max(found.offset, low, until_offset - self.max_records)
         return start if start < until_offset else None
 
-    def warm(self, partition: int, cache: DedupCache, until_offset: int) -> WarmupResult:
-        """Load ids from [window start, until_offset) into the cache."""
+    def replay(
+        self, partition: int, until_offset: int, on_message: Callable[[object], bool]
+    ) -> WarmupResult:
+        """on_message returns True when a record was used, False when skipped."""
         started = time.monotonic()
         result = WarmupResult(partition=partition, until_offset=until_offset)
         if until_offset <= 0:
@@ -111,18 +132,42 @@ class CacheWarmer:
                     raise KafkaException(msg.error())
                 if msg.offset() >= until_offset:
                     break
-                self._load(msg, cache, result)
+                if on_message(msg):
+                    result.loaded += 1
+                else:
+                    result.skipped += 1
         finally:
             consumer.close()
             result.seconds = time.monotonic() - started
         return result
 
-    def _load(self, msg, cache: DedupCache, result: WarmupResult) -> None:
+
+class CacheWarmer(PartitionReplayer):
+    """Refills the cleaner's dedup cache from wiki.raw.
+
+    wiki.raw is keyed by event id, so every copy of an event is on the same
+    partition as its original, and one partition's history is enough.
+    """
+
+    def __init__(
+        self,
+        topic: str = TOPIC_RAW,
+        window_ms: int = HOUR_MS,
+        max_records: int = MAX_RECORDS,
+        consumer_factory: Callable[[], Consumer] = default_consumer_factory,
+        now_ms: Callable[[], int] = lambda: int(time.time() * 1000),
+    ):
+        super().__init__(topic, window_ms, max_records, consumer_factory, now_ms)
+
+    def warm(self, partition: int, cache: DedupCache, until_offset: int) -> WarmupResult:
+        """Load ids from [window start, until_offset) into the cache."""
+        return self.replay(partition, until_offset, lambda msg: self._load(msg, cache))
+
+    def _load(self, msg, cache: DedupCache) -> bool:
         _, message_time = msg.timestamp()
         try:
             event_id = event_id_of(parse_raw(msg.value()))
         except ParseError:
-            result.skipped += 1
-            return
+            return False
         cache.is_new(event_id, message_time if message_time > 0 else self.now_ms())
-        result.loaded += 1
+        return True

@@ -7,6 +7,12 @@ produces the same id and downstream writes stay idempotent.
 
 wiki.clean is keyed by page, so every edit to a page arrives on one
 partition in order. That lets each partition own an independent detector.
+
+A detector's revert history lives in memory, so a new owner of a partition
+first replays the last window of it up to the committed offset. Without
+that, a war with two reverts before a restart and one after would be
+missed. Alerts found during the replay are discarded: they were committed
+in the same transactions as the offsets being replayed up to.
 """
 
 import os
@@ -27,8 +33,9 @@ from common.config import (  # noqa: E402
 )
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
-from processors.edit_war_detector import EditWarDetector  # noqa: E402
+from processors.edit_war_detector import DEFAULT_WINDOW_MS, EditWarDetector  # noqa: E402
 from processors.transform import event_time_ms  # noqa: E402
+from processors.warmup import PartitionReplayer, consumer_factory_for  # noqa: E402
 
 log = setup_logging("edit-war")
 
@@ -49,6 +56,11 @@ class EditWarProcessor:
         self.transactional_id = transactional_id(instance)
         self.producer = Producer(transactional_producer_config(self.transactional_id))
         self.consumer = Consumer(consumer_config(GROUP_ID))
+        self.replayer = PartitionReplayer(
+            TOPIC_CLEAN,
+            DEFAULT_WINDOW_MS,
+            consumer_factory=consumer_factory_for("edit-war-warmup"),
+        )
         self.detectors = {}
         self.meter = RateMeter(log, "edit-war")
         self.running = True
@@ -66,9 +78,42 @@ class EditWarProcessor:
 
     def on_assign(self, consumer, partitions):
         consumer.incremental_assign(partitions)
-        for tp in partitions:
-            self.detector_for(tp.partition)
         log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
+        self.warm(consumer, partitions)
+
+    def warm(self, consumer, partitions) -> None:
+        if not partitions:
+            return
+        committed = {
+            tp.partition: tp.offset
+            for tp in consumer.committed(list(partitions), timeout=30)
+        }
+        for tp in partitions:
+            detector = self.detectors[tp.partition] = EditWarDetector()
+            offset = committed.get(tp.partition, -1)
+            if offset is None or offset < 0:
+                continue
+            result = self.replayer.replay(
+                tp.partition, offset, lambda msg, d=detector: self._replay_into(d, msg)
+            )
+            if result.replayed:
+                log.info(
+                    "warmed partition %d from %d events in %.1fs, %d pages with reverts",
+                    tp.partition,
+                    result.loaded,
+                    result.seconds,
+                    len(detector.pages),
+                )
+
+    @staticmethod
+    def _replay_into(detector: EditWarDetector, msg) -> bool:
+        try:
+            event = CleanEvent.from_json(msg.value())
+        except (ValueError, TypeError):
+            return False
+        _, message_time = msg.timestamp()
+        detector.observe(event, event_time_ms(event, message_time))
+        return True
 
     def on_revoke(self, consumer, partitions):
         if self.in_transaction:
