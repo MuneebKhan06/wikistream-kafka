@@ -60,10 +60,11 @@ def test_valid_json_with_bad_fields_is_rejected():
 def test_dlq_envelope_keeps_payload_and_position():
     result = transform(b"{not json", DedupCache())
     envelope = json.loads(result.envelope("wiki.raw", 3, 4242))
-    assert envelope["partition"] == 3
-    assert envelope["offset"] == 4242
+    assert envelope["stage"] == "cleaner"
+    assert envelope["position"] == {"partition": 3, "offset": 4242}
     assert envelope["payload"] == "{not json"
-    assert envelope["source_topic"] == "wiki.raw"
+    assert envelope["source"] == "wiki.raw"
+    assert "invalid json" in envelope["reason"]
 
 
 def test_dlq_envelope_survives_invalid_utf8():
