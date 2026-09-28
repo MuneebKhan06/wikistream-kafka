@@ -60,6 +60,10 @@ class CleanEvent:
     length_old: Optional[int]
     length_new: Optional[int]
     server_name: str
+    # Only set on log events. Defaulted so records written before these
+    # fields existed still decode.
+    log_type: Optional[str] = None
+    log_action: Optional[str] = None
 
     @property
     def page_key(self) -> str:
@@ -169,4 +173,10 @@ def clean_event(raw: dict) -> CleanEvent:
         length_old=_optional_int(length.get("old")),
         length_new=_optional_int(length.get("new")),
         server_name=str(raw.get("server_name") or ""),
+        log_type=_optional_str(raw.get("log_type")),
+        log_action=_optional_str(raw.get("log_action")),
     )
+
+
+def _optional_str(value) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
