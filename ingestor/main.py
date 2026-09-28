@@ -5,6 +5,14 @@ callbacks do not arrive in produce order. The checkpoint may only move to
 an event whose predecessors are all confirmed, otherwise a crash would
 skip the gaps. DeliveryTracker keeps produce order and releases the
 longest confirmed prefix.
+
+A failed delivery stops the ingestor. The producer has already retried
+until its delivery timeout, so Kafka is refusing writes, for example with
+two of three brokers down. Carrying on would leave that event missing from
+Kafka, hold the checkpoint behind it forever, and grow the list of pending
+deliveries without limit. Stopping instead keeps the checkpoint before the
+failed event, so the next start re-reads it and nothing is lost. Events
+after it that did get through arrive twice, and the cleaner removes them.
 """
 
 import json
@@ -79,6 +87,7 @@ class Ingestor:
         self.tracker = DeliveryTracker()
         self.meter = RateMeter(log, "ingest")
         self.running = True
+        self.failure = None
         self.seq = 0
         self._unsaved = 0
         self._last_save = time.monotonic()
@@ -89,8 +98,12 @@ class Ingestor:
 
     def _on_delivery(self, err, msg, seq: int, stream_id: Optional[str]):
         if err is not None:
+            # Never confirmed, so the checkpoint cannot move past this event.
             self.meter.mark_error()
-            log.error("delivery failed: %s", err)
+            if self.failure is None:
+                self.failure = err
+                log.error("delivery failed, stopping so no event is skipped: %s", err)
+            self.running = False
             return
         released, count = self.tracker.confirm(seq)
         if count:
@@ -188,6 +201,9 @@ def main() -> None:
     signal.signal(signal.SIGINT, ingestor.stop)
     signal.signal(signal.SIGTERM, ingestor.stop)
     ingestor.run()
+    if ingestor.failure is not None:
+        # Non zero so a supervisor restarts it from the checkpoint.
+        sys.exit(1)
 
 
 if __name__ == "__main__":

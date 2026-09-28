@@ -1,4 +1,46 @@
-from ingestor.main import DeliveryTracker
+from ingestor.main import DeliveryTracker, Ingestor
+
+
+class FakeError:
+    def __str__(self):
+        return "NOT_ENOUGH_REPLICAS"
+
+
+def make_ingestor(tmp_path):
+    return Ingestor(checkpoint_path=tmp_path / "ingestor.json")
+
+
+def test_failed_delivery_stops_the_ingestor(tmp_path):
+    ingestor = make_ingestor(tmp_path)
+    ingestor.tracker.register(1, "a")
+    ingestor._on_delivery(FakeError(), None, 1, "a")
+    assert ingestor.running is False
+    assert ingestor.failure is not None
+
+
+def test_checkpoint_stays_behind_a_failed_delivery(tmp_path):
+    """Later successes must not carry the checkpoint past the lost event."""
+    ingestor = make_ingestor(tmp_path)
+    ingestor.tracker.register(1, "before")
+    ingestor.tracker.register(2, "failed")
+    ingestor.tracker.register(3, "after")
+
+    ingestor._on_delivery(None, None, 1, "before")
+    ingestor._on_delivery(FakeError(), None, 2, "failed")
+    ingestor._on_delivery(None, None, 3, "after")
+
+    assert ingestor.checkpoint.last_event_id == "before"
+    assert ingestor.tracker.in_flight == 2
+
+
+def test_only_the_first_failure_is_kept(tmp_path):
+    ingestor = make_ingestor(tmp_path)
+    first, second = FakeError(), FakeError()
+    ingestor.tracker.register(1, "a")
+    ingestor.tracker.register(2, "b")
+    ingestor._on_delivery(first, None, 1, "a")
+    ingestor._on_delivery(second, None, 2, "b")
+    assert ingestor.failure is first
 
 
 def test_in_order_delivery_releases_each_id():
