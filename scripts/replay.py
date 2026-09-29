@@ -49,16 +49,25 @@ def load(path: Path) -> list:
     return records
 
 
-def pace(records: list, index: int, started: float, args) -> None:
-    """Sleep so the send matches the requested speed, if any."""
+def pace(records: list, index: int, started: float, args, loop: int = 0) -> None:
+    """Sleep so the send matches the requested speed, if any.
+
+    Targets are measured from the start of the whole run, so a later pass
+    continues the schedule instead of restarting it. Restarting would put
+    every target of the second pass in the past, and nothing after the
+    first pass would be throttled.
+    """
     if args.rate:
-        target = started + index / args.rate
+        target = started + (loop * len(records) + index) / args.rate
     elif args.speed:
         first = records[0][2]
         current = records[index][2]
-        if not first or not current:
+        last = records[-1][2]
+        if not first or not current or not last:
             return
-        target = started + (current - first) / args.speed
+        # One pass covers the file's span, plus a second so passes do not overlap.
+        span = last - first + 1
+        target = started + (loop * span + current - first) / args.speed
     else:
         return
 
@@ -97,7 +106,7 @@ def replay(records: list, args) -> dict:
     started = time.monotonic()
     for loop in range(args.loops):
         for index, (event_id, payload, _) in enumerate(records):
-            pace(records, index, started, args)
+            pace(records, index, started, args, loop)
             while True:
                 try:
                     producer.produce(

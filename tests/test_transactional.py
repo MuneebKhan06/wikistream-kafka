@@ -66,6 +66,15 @@ class FakeConsumer:
     def consumer_group_metadata(self):
         return object()
 
+    def committed(self, partitions, timeout=None):
+        # No commits yet, so the retention check has nothing to report.
+        from confluent_kafka import TopicPartition
+
+        return [TopicPartition("t", tp.partition, -1001) for tp in partitions]
+
+    def get_watermark_offsets(self, tp, timeout=None, cached=False):
+        return (0, 0)
+
     def incremental_assign(self, partitions):
         self.calls.append("assign")
 

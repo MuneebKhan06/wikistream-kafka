@@ -19,6 +19,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException  # noqa: E402
 from common.config import TOPIC_CLEAN, consumer_config  # noqa: E402
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
+from common.offsets import report_retention_gaps  # noqa: E402
 from sinks.db import insert_edits, wait_for_database  # noqa: E402
 
 log = setup_logging("postgres-sink")
@@ -63,6 +64,7 @@ class PostgresSink:
     def on_assign(self, consumer, partitions):
         consumer.incremental_assign(partitions)
         log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
+        report_retention_gaps(log, consumer, partitions)
 
     def on_revoke(self, consumer, partitions):
         consumer.incremental_unassign(partitions)
