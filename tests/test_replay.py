@@ -83,3 +83,22 @@ def test_default_sample_is_found_from_any_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert DEFAULT_SAMPLE.is_absolute()
     assert DEFAULT_SAMPLE.exists()
+
+
+def test_rate_keeps_throttling_on_later_passes(tmp_path):
+    """The second pass continues the schedule rather than starting over."""
+    records = load(write_sample(tmp_path, 3))
+    args = parse_args(["--rate", "20", "--loops", "2"])
+    started = time.monotonic()
+    # First record of the second pass is the 4th send overall: 3 / 20 s in.
+    pace(records, 0, started, args, loop=1)
+    assert time.monotonic() - started >= 0.14
+
+
+def test_speed_offsets_later_passes_by_the_file_span(tmp_path):
+    records = load(write_sample(tmp_path, 3))
+    args = parse_args(["--speed", "20", "--loops", "2"])
+    started = time.monotonic()
+    # The file spans 2 s, plus 1 s between passes, so pass 2 starts 3 s in.
+    pace(records, 0, started, args, loop=1)
+    assert time.monotonic() - started >= 0.14
