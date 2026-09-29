@@ -19,6 +19,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
 from common.config import consumer_config, transactional_producer_config
 from common.metrics import RateMeter, log_lag
+from common.offsets import report_retention_gaps
 
 COMMIT_INTERVAL_SEC = 0.5
 MAX_BATCH = 2000
@@ -70,6 +71,7 @@ class TransactionalProcessor:
     def on_assign(self, consumer, partitions):
         consumer.incremental_assign(partitions)
         self.log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
+        report_retention_gaps(self.log, consumer, partitions)
         self.partitions_assigned(consumer, partitions)
 
     def on_revoke(self, consumer, partitions):
