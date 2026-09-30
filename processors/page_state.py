@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.config import TOPIC_CLEAN, TOPIC_PAGE_LATEST  # noqa: E402
+from common.config import TOPIC_CLEAN, TOPIC_PAGE_LATEST, scoped  # noqa: E402
 from common.metrics import setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
 from processors.page_latest import page_update  # noqa: E402
@@ -26,12 +26,12 @@ from processors.transactional import TransactionalProcessor  # noqa: E402
 
 log = setup_logging("page-state")
 
-GROUP_ID = "page-state"
+GROUP_ID = scoped("page-state")
 INSTANCE = os.getenv("PAGE_STATE_INSTANCE", "1")
 
 
 def transactional_id(instance: str) -> str:
-    return f"page-state-{instance}"
+    return scoped(f"page-state-{instance}")
 
 
 class PageState(TransactionalProcessor):

@@ -10,12 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.config import TOPIC_ALERTS  # noqa: E402
+from common.config import TOPIC_ALERTS, scoped  # noqa: E402
 from processors.edit_war_detector import EditWarAlert  # noqa: E402
 from sinks.db import insert_alerts  # noqa: E402
 from sinks.postgres_sink import PostgresSink  # noqa: E402
 
-GROUP_ID = "alerts-storage"
+GROUP_ID = scoped("alerts-storage")
 
 
 def build() -> PostgresSink:

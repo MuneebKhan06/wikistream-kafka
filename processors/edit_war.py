@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.config import TOPIC_ALERTS, TOPIC_CLEAN  # noqa: E402
+from common.config import TOPIC_ALERTS, TOPIC_CLEAN, scoped  # noqa: E402
 from common.metrics import setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
 from processors.edit_war_detector import DEFAULT_WINDOW_MS, EditWarDetector  # noqa: E402
@@ -34,13 +34,13 @@ from processors.warmup import PartitionReplayer, consumer_factory_for  # noqa: E
 
 log = setup_logging("edit-war")
 
-GROUP_ID = "edit-wars"
+GROUP_ID = scoped("edit-wars")
 INSTANCE = os.getenv("EDIT_WAR_INSTANCE", "1")
 EXPIRE_INTERVAL_SEC = 60.0
 
 
 def transactional_id(instance: str) -> str:
-    return f"edit-war-{instance}"
+    return scoped(f"edit-war-{instance}")
 
 
 class EditWarProcessor(TransactionalProcessor):
@@ -53,7 +53,7 @@ class EditWarProcessor(TransactionalProcessor):
         self.replayer = PartitionReplayer(
             TOPIC_CLEAN,
             DEFAULT_WINDOW_MS,
-            consumer_factory=consumer_factory_for("edit-war-warmup"),
+            consumer_factory=consumer_factory_for(scoped("edit-war-warmup")),
         )
         self.detectors = {}
         self.alerts = 0

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.config import TOPIC_CLEAN, TOPIC_DLQ, TOPIC_RAW  # noqa: E402
+from common.config import TOPIC_CLEAN, TOPIC_DLQ, TOPIC_RAW, scoped  # noqa: E402
 from common.metrics import setup_logging  # noqa: E402
 from processors.dedup import DedupCache  # noqa: E402
 from processors.transactional import TransactionalProcessor  # noqa: E402
@@ -25,12 +25,12 @@ from processors.warmup import CacheWarmer  # noqa: E402
 
 log = setup_logging("cleaner")
 
-GROUP_ID = "cleaner"
+GROUP_ID = scoped("cleaner")
 INSTANCE = os.getenv("CLEANER_INSTANCE", "1")
 
 
 def transactional_id(instance: str) -> str:
-    return f"cleaner-{instance}"
+    return scoped(f"cleaner-{instance}")
 
 
 class Cleaner(TransactionalProcessor):

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from confluent_kafka import Consumer, KafkaError, KafkaException  # noqa: E402
 
-from common.config import TOPIC_CLEAN, consumer_config  # noqa: E402
+from common.config import TOPIC_CLEAN, consumer_config, scoped  # noqa: E402
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
 from common.offsets import report_retention_gaps  # noqa: E402
@@ -24,7 +24,7 @@ from sinks.db import insert_edits, wait_for_database  # noqa: E402
 
 log = setup_logging("postgres-sink")
 
-GROUP_ID = "storage"
+GROUP_ID = scoped("storage")
 BATCH_SIZE = 500
 BATCH_INTERVAL_SEC = 1.0
 LAG_INTERVAL_SEC = 30.0

@@ -23,7 +23,7 @@ from typing import Callable, Optional
 
 from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 
-from common.config import TOPIC_RAW, consumer_config
+from common.config import TOPIC_RAW, consumer_config, scoped
 from common.models import ParseError, event_id_of, parse_raw
 from processors.dedup import HOUR_MS, DedupCache
 
@@ -54,7 +54,7 @@ def consumer_factory_for(group_id: str) -> Callable[[], Consumer]:
     return factory
 
 
-default_consumer_factory = consumer_factory_for("cleaner-warmup")
+default_consumer_factory = consumer_factory_for(scoped("cleaner-warmup"))
 
 
 class PartitionReplayer:
