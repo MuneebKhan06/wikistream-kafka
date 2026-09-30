@@ -17,12 +17,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition  # noqa: E402
+from confluent_kafka import Consumer, TopicPartition  # noqa: E402
 
 from common.config import TOPIC_CLEAN, consumer_config, scoped  # noqa: E402
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
 from common.offsets import report_retention_gaps  # noqa: E402
+from common.topics import (  # noqa: E402
+    AssignmentWatchdog,
+    check_consumer_error,
+    wait_for_topics,
+)
 from processors.transform import event_time_ms  # noqa: E402
 from processors.windows import MinuteWindows  # noqa: E402
 from sinks.db import upsert_trending, wait_for_database  # noqa: E402
@@ -118,24 +123,33 @@ class Trending:
             self._last_lag_report = now
 
     def run(self) -> None:
-        self.consumer.subscribe(
-            [TOPIC_CLEAN], on_assign=self.on_assign, on_revoke=self.on_revoke
-        )
+        wait_for_topics(self.consumer, [TOPIC_CLEAN], log)
+        self._subscribe()
+        watchdog = AssignmentWatchdog(self.consumer, GROUP_ID, [TOPIC_CLEAN], log, self._rejoin)
         log.info("trending started, group %s", GROUP_ID)
 
         while self.running:
             msg = self.consumer.poll(POLL_TIMEOUT_SEC)
+            watchdog.check()
             if msg is None:
                 self._periodic()
                 continue
             if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                raise KafkaException(msg.error())
+                check_consumer_error(msg, log)
+                continue
             self.handle(msg)
             self._periodic()
 
         self.shutdown()
+
+    def _subscribe(self) -> None:
+        self.consumer.subscribe(
+            [TOPIC_CLEAN], on_assign=self.on_assign, on_revoke=self.on_revoke
+        )
+
+    def _rejoin(self) -> None:
+        self.consumer.unsubscribe()
+        self._subscribe()
 
     def shutdown(self) -> None:
         self.flush(final=True)

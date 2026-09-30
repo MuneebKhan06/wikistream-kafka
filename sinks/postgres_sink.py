@@ -14,12 +14,17 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from confluent_kafka import Consumer, KafkaError, KafkaException  # noqa: E402
+from confluent_kafka import Consumer  # noqa: E402
 
 from common.config import TOPIC_CLEAN, consumer_config, scoped  # noqa: E402
 from common.metrics import RateMeter, log_lag, setup_logging  # noqa: E402
 from common.models import CleanEvent  # noqa: E402
 from common.offsets import report_retention_gaps  # noqa: E402
+from common.topics import (  # noqa: E402
+    AssignmentWatchdog,
+    check_consumer_error,
+    wait_for_topics,
+)
 from sinks.db import insert_edits, wait_for_database  # noqa: E402
 
 log = setup_logging("postgres-sink")
@@ -81,9 +86,8 @@ class PostgresSink:
             if msg is None:
                 continue
             if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                raise KafkaException(msg.error())
+                check_consumer_error(msg, log)
+                continue
             batch.append(msg)
         return batch
 
@@ -116,8 +120,10 @@ class PostgresSink:
             self._last_lag_report = now
 
     def run(self) -> None:
-        self.consumer.subscribe(
-            [self.topic], on_assign=self.on_assign, on_revoke=self.on_revoke
+        wait_for_topics(self.consumer, [self.topic], log)
+        self._subscribe()
+        watchdog = AssignmentWatchdog(
+            self.consumer, self.group_id, [self.topic], log, self._rejoin
         )
         log.info("postgres sink started, %s into group %s", self.topic, self.group_id)
 
@@ -126,8 +132,18 @@ class PostgresSink:
             if batch:
                 self.write_batch(batch)
             self._report_lag()
+            watchdog.check()
 
         self.shutdown()
+
+    def _subscribe(self) -> None:
+        self.consumer.subscribe(
+            [self.topic], on_assign=self.on_assign, on_revoke=self.on_revoke
+        )
+
+    def _rejoin(self) -> None:
+        self.consumer.unsubscribe()
+        self._subscribe()
 
     def shutdown(self) -> None:
         self.consumer.close()
