@@ -15,11 +15,12 @@ would stop the first.
 import logging
 import time
 
-from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
+from confluent_kafka import Consumer, KafkaException, Producer
 
 from common.config import consumer_config, transactional_producer_config
 from common.metrics import RateMeter, log_lag
 from common.offsets import report_retention_gaps
+from common.topics import AssignmentWatchdog, check_consumer_error, wait_for_topics
 
 COMMIT_INTERVAL_SEC = 0.5
 MAX_BATCH = 2000
@@ -102,9 +103,8 @@ class TransactionalProcessor:
             if msg is None:
                 continue
             if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                raise KafkaException(msg.error())
+                check_consumer_error(msg, self.log)
+                continue
             batch.append(msg)
         return batch
 
@@ -136,8 +136,10 @@ class TransactionalProcessor:
 
     def run(self) -> None:
         self.producer.init_transactions()
-        self.consumer.subscribe(
-            [self.input_topic], on_assign=self.on_assign, on_revoke=self.on_revoke
+        wait_for_topics(self.consumer, [self.input_topic], self.log)
+        self._subscribe()
+        watchdog = AssignmentWatchdog(
+            self.consumer, self.group_id, [self.input_topic], self.log, self._rejoin
         )
         self.log.info("%s started, transactional id %s", self.name, self.transactional_id)
 
@@ -147,8 +149,19 @@ class TransactionalProcessor:
                 self.process_batch(batch)
             self.periodic()
             self._report_lag()
+            watchdog.check()
 
         self.shutdown()
+
+    def _subscribe(self) -> None:
+        self.consumer.subscribe(
+            [self.input_topic], on_assign=self.on_assign, on_revoke=self.on_revoke
+        )
+
+    def _rejoin(self) -> None:
+        """Leave and rejoin the group, so the assignment is computed again."""
+        self.consumer.unsubscribe()
+        self._subscribe()
 
     def shutdown(self) -> None:
         if self.in_transaction:

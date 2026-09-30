@@ -15,6 +15,7 @@ the page back with its next edit.
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Optional, Tuple
 
 from common.models import CleanEvent
@@ -65,6 +66,11 @@ class PageLatest:
     @classmethod
     def from_json(cls, payload: bytes) -> "PageLatest":
         return cls(**json.loads(payload))
+
+
+def event_ms(event_time: str) -> int:
+    """Epoch milliseconds for an ISO event time, for ordering updates."""
+    return int(datetime.fromisoformat(event_time).timestamp() * 1000)
 
 
 def is_deletion(event: CleanEvent) -> bool:

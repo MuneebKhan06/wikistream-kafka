@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from common.config import STATE_DIR
+from common.config import DEFAULT_NAMESPACE, NAMESPACE, STATE_DIR
 
-DEFAULT_PATH = Path(os.getenv("INGESTOR_CHECKPOINT", str(STATE_DIR / "ingestor.json")))
+# A separate file per namespace, so a test run never moves the real checkpoint.
+_CHECKPOINT_NAME = "ingestor.json" if NAMESPACE == DEFAULT_NAMESPACE else f"{NAMESPACE}-ingestor.json"
+DEFAULT_PATH = Path(os.getenv("INGESTOR_CHECKPOINT", str(STATE_DIR / _CHECKPOINT_NAME)))
 
 
 @dataclass

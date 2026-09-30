@@ -22,10 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from confluent_kafka.admin import AdminClient  # noqa: E402
 
-from common.config import admin_config  # noqa: E402
+from common.config import NAMESPACE, admin_config  # noqa: E402
 
 POLL_SEC = 0.1
-PREFIX = "wiki."
+PREFIX = f"{NAMESPACE}."
 
 
 def pipeline_partitions(admin: AdminClient):

@@ -29,14 +29,33 @@ class TopicSpec:
     config: dict
 
 
-REPLICATION_FACTOR = 3
-MIN_INSYNC_REPLICAS = "2"
+# Every name the pipeline uses in Kafka hangs off one namespace, so a test run
+# can create its own topics, consumer groups and transactional ids next to the
+# running pipeline without touching it. Sharing a transactional id would fence
+# the real producer, and sharing a group would take its partitions. The
+# default namespace keeps the production names unchanged.
+DEFAULT_NAMESPACE = "wiki"
+NAMESPACE = os.getenv("PIPELINE_NAMESPACE", DEFAULT_NAMESPACE)
 
-TOPIC_RAW = "wiki.raw"
-TOPIC_CLEAN = "wiki.clean"
-TOPIC_ALERTS = "wiki.alerts"
-TOPIC_PAGE_LATEST = "wiki.page-latest"
-TOPIC_DLQ = "wiki.dlq"
+
+def topic_name(name: str) -> str:
+    return f"{NAMESPACE}.{name}"
+
+
+def scoped(name: str) -> str:
+    """A consumer group or transactional id, prefixed outside the default namespace."""
+    return name if NAMESPACE == DEFAULT_NAMESPACE else f"{NAMESPACE}.{name}"
+
+
+# Three brokers in production. A single broker test cluster sets both to 1.
+REPLICATION_FACTOR = int(os.getenv("KAFKA_REPLICATION_FACTOR", "3"))
+MIN_INSYNC_REPLICAS = os.getenv("KAFKA_MIN_INSYNC_REPLICAS", "2")
+
+TOPIC_RAW = topic_name("raw")
+TOPIC_CLEAN = topic_name("clean")
+TOPIC_ALERTS = topic_name("alerts")
+TOPIC_PAGE_LATEST = topic_name("page-latest")
+TOPIC_DLQ = topic_name("dlq")
 
 TOPICS = [
     TopicSpec(TOPIC_RAW, 6, {"retention.ms": str(DAY_MS)}),

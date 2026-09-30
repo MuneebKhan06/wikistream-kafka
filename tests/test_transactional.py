@@ -6,12 +6,19 @@ from processors.transactional import TransactionalProcessor
 
 
 class FakeError:
-    def __init__(self, code=None, abortable=False):
+    def __init__(self, code=None, abortable=False, fatal=False):
         self._code = code
         self._abortable = abortable
+        self._fatal = fatal
 
     def code(self):
         return self._code
+
+    def fatal(self):
+        return self._fatal
+
+    def str(self):
+        return f"error {self._code}"
 
     def txn_requires_abort(self):
         return self._abortable
@@ -163,12 +170,20 @@ def test_collect_batch_skips_partition_eof_markers():
     assert [m.value() for m in batch] == [b"a", b"b"]
 
 
-def test_collect_batch_raises_on_real_errors():
-    broken = FakeMessage(None, error=FakeError(code=KafkaError._TRANSPORT))
+def test_collect_batch_raises_on_fatal_errors():
+    broken = FakeMessage(None, error=FakeError(code=KafkaError._FENCED, fatal=True))
     processor = Recorder(consumer=FakeConsumer([broken]))
     try:
         processor.collect_batch()
     except KafkaException:
         pass
     else:
-        raise AssertionError("a consumer error must not be swallowed")
+        raise AssertionError("a fatal consumer error must not be swallowed")
+
+
+def test_collect_batch_rides_out_errors_the_client_is_retrying():
+    """A topic briefly unknown after creation must not stop the processor."""
+    unknown = FakeMessage(None, error=FakeError(code=KafkaError.UNKNOWN_TOPIC_OR_PART))
+    consumer = FakeConsumer([unknown, FakeMessage(b"a")])
+    batch = Recorder(consumer=consumer).collect_batch()
+    assert [m.value() for m in batch] == [b"a"]
