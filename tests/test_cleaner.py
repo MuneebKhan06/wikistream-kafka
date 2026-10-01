@@ -88,3 +88,45 @@ def test_transactional_id_is_per_instance():
 
     assert transactional_id("1") == "cleaner-1"
     assert transactional_id("2") != transactional_id("1")
+
+
+CANARY = {
+    "$schema": "/mediawiki/recentchange/1.0.1",
+    "meta": {
+        "dt": "2026-09-25T10:15:00.000Z",
+        "stream": "mediawiki.recentchange",
+        "domain": "canary",
+        "id": "bd9854de-9eda-4c4e-be9f-dfc5ef94795b",
+    },
+}
+
+
+def test_stream_heartbeats_are_skipped_not_rejected():
+    from processors.transform import Skipped
+
+    result = transform(json.dumps(CANARY).encode(), DedupCache())
+    assert isinstance(result, Skipped)
+    assert result.reason == "canary"
+
+
+def test_a_heartbeat_does_not_enter_the_dedup_cache():
+    cache = DedupCache()
+    transform(json.dumps(CANARY).encode(), cache)
+    assert cache.size == 0
+
+
+def test_a_real_event_without_a_type_is_still_rejected():
+    """Only the canary marker exempts an event, not a missing type."""
+    raw = json.loads(payload())
+    del raw["type"]
+    result = transform(json.dumps(raw).encode(), DedupCache())
+    assert isinstance(result, Rejected)
+
+
+def test_canary_detection_tolerates_odd_meta():
+    from common.models import is_canary
+
+    assert is_canary({"meta": {"domain": "canary"}}) is True
+    assert is_canary({"meta": {"domain": "en.wikipedia.org"}}) is False
+    assert is_canary({"meta": None}) is False
+    assert is_canary({}) is False

@@ -1,7 +1,11 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["integration: needs a running Postgres or Kafka"]
+markers = [
+    "integration: needs a running Postgres or Kafka",
+    "e2e: runs the whole pipeline, about a minute; select with -m e2e",
+]
+addopts = "-m 'not e2e'"
 
 [tool.ruff]
 line-length = 100

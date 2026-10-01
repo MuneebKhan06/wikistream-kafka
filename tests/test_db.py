@@ -134,3 +134,84 @@ def test_alert_insert_is_idempotent(connection):
         with connection.cursor() as cur:
             cur.execute("DELETE FROM alerts WHERE wiki = 'testwiki'")
         connection.commit()
+
+
+# Reconnecting, with a fake connection so no server has to be restarted.
+
+
+class FakeConnection:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def make_database(monkeypatch, connections):
+    import logging
+
+    import psycopg2
+
+    from sinks import db
+
+    opened = []
+
+    def fake_wait(retries=10, delay=2.0, log=None):
+        if not connections:
+            raise psycopg2.OperationalError("server still down")
+        conn = connections.pop(0)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(db, "wait_for_database", fake_wait)
+    return db.Database(logging.getLogger("t")), opened
+
+
+def test_a_write_on_a_healthy_connection_just_runs(monkeypatch):
+    database, opened = make_database(monkeypatch, [FakeConnection()])
+    assert database.write(lambda conn, rows: len(rows), [1, 2, 3]) == 3
+    assert database.reconnects == 0
+    assert len(opened) == 1
+
+
+def test_a_lost_connection_is_reopened_and_the_same_write_retried(monkeypatch):
+    import psycopg2
+
+    first, second = FakeConnection(), FakeConnection()
+    database, _ = make_database(monkeypatch, [first, second])
+    calls = []
+
+    def write(conn, rows):
+        calls.append((conn, rows))
+        if conn is first:
+            raise psycopg2.OperationalError("server closed the connection unexpectedly")
+        return len(rows)
+
+    assert database.write(write, ["a", "b"]) == 2
+    assert first.closed is True
+    assert database.reconnects == 1
+    # The retry carried exactly the same batch.
+    assert [rows for _, rows in calls] == [["a", "b"], ["a", "b"]]
+
+
+def test_giving_up_raises_so_offsets_stay_uncommitted(monkeypatch):
+    import psycopg2
+
+    database, _ = make_database(monkeypatch, [FakeConnection()])
+
+    def write(conn, rows):
+        raise psycopg2.InterfaceError("connection already closed")
+
+    with pytest.raises(psycopg2.OperationalError):
+        database.write(write, ["a"])
+
+
+def test_errors_that_are_not_about_the_connection_are_not_retried(monkeypatch):
+    database, _ = make_database(monkeypatch, [FakeConnection(), FakeConnection()])
+
+    def write(conn, rows):
+        raise ValueError("bad row")
+
+    with pytest.raises(ValueError):
+        database.write(write, ["a"])
+    assert database.reconnects == 0

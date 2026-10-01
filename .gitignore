@@ -217,3 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 state/
+
+# Runtime files written by scripts/pipeline.sh
+logs/
+run/

@@ -30,7 +30,7 @@ from common.topics import (  # noqa: E402
 )
 from processors.transform import event_time_ms  # noqa: E402
 from processors.windows import MinuteWindows  # noqa: E402
-from sinks.db import upsert_trending, wait_for_database  # noqa: E402
+from sinks.db import Database, upsert_trending  # noqa: E402
 
 log = setup_logging("trending")
 
@@ -43,7 +43,7 @@ LAG_INTERVAL_SEC = 30.0
 class Trending:
     def __init__(self):
         self.consumer = Consumer(consumer_config(GROUP_ID))
-        self.connection = wait_for_database(log=log)
+        self.db = Database(log)
         self.windows = MinuteWindows()
         self.meter = RateMeter(log, "trending")
         self.running = True
@@ -97,7 +97,7 @@ class Trending:
         closed = self.windows.pop_closed(final=final)
         if closed:
             rows = [window.as_row() for window in closed]
-            upsert_trending(self.connection, rows)
+            self.db.write(upsert_trending, rows)
             self.written_rows += len(rows)
             log.info(
                 "wrote %d page minutes, %d windows still open",
@@ -154,7 +154,7 @@ class Trending:
     def shutdown(self) -> None:
         self.flush(final=True)
         self.consumer.close()
-        self.connection.close()
+        self.db.close()
         self.meter.report(force=True)
         stats = self.windows.stats()
         log.info(
