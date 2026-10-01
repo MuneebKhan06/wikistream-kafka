@@ -139,3 +139,56 @@ def wait_for_database(retries: int = 10, delay: float = 2.0, log: logging.Logger
                 log.warning("database not ready (attempt %d/%d)", attempt, retries)
             time.sleep(delay)
     raise last_error
+
+
+RECONNECT_RETRIES = 30
+RECONNECT_DELAY_SEC = 2.0
+CONNECTION_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+class Database:
+    """A connection that survives PostgreSQL going away.
+
+    If the server restarts or a connection is dropped, the write in progress
+    fails. Rather than let that end the process, the connection is reopened
+    and the same write is tried again. That is safe for two reasons that are
+    already true of every write here: each one is idempotent, and Kafka
+    offsets are only committed after the write succeeds, so a retry cannot
+    skip or duplicate anything.
+
+    Reconnecting gives up after about a minute. The process then exits with
+    its offsets uncommitted, and whatever restarts it resumes from the same
+    batch.
+    """
+
+    def __init__(
+        self,
+        log: logging.Logger,
+        retries: int = RECONNECT_RETRIES,
+        delay: float = RECONNECT_DELAY_SEC,
+    ):
+        self.log = log
+        self.retries = retries
+        self.delay = delay
+        self.reconnects = 0
+        self.connection = wait_for_database(log=log)
+
+    def write(self, operation, *args):
+        """Run operation(connection, *args), reconnecting if the connection is lost."""
+        while True:
+            try:
+                return operation(self.connection, *args)
+            except CONNECTION_ERRORS as exc:
+                text = str(exc).strip()
+                reason = text.splitlines()[0] if text else type(exc).__name__
+                self.log.warning("database write failed (%s), reconnecting", reason)
+                self.close()
+                self.connection = wait_for_database(self.retries, self.delay, self.log)
+                self.reconnects += 1
+                self.log.info("database connection restored, retrying the write")
+
+    def close(self) -> None:
+        try:
+            self.connection.close()
+        except Exception:
+            pass

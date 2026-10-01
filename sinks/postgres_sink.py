@@ -25,7 +25,7 @@ from common.topics import (  # noqa: E402
     check_consumer_error,
     wait_for_topics,
 )
-from sinks.db import insert_edits, wait_for_database  # noqa: E402
+from sinks.db import Database, insert_edits  # noqa: E402
 
 log = setup_logging("postgres-sink")
 
@@ -55,7 +55,7 @@ class PostgresSink:
         self.decode = decode
         self.write = write
         self.consumer = Consumer(consumer_config(group_id))
-        self.connection = wait_for_database(log=log)
+        self.db = Database(log)
         self.meter = RateMeter(log, label)
         self.running = True
         self.inserted = 0
@@ -107,7 +107,7 @@ class PostgresSink:
                     exc,
                 )
 
-        written = self.write(self.connection, events)
+        written = self.db.write(self.write, events)
         self.inserted += written
         self.skipped += len(events) - written
         self.meter.mark(len(events))
@@ -147,7 +147,7 @@ class PostgresSink:
 
     def shutdown(self) -> None:
         self.consumer.close()
-        self.connection.close()
+        self.db.close()
         self.meter.report(force=True)
         log.info(
             "stopped, %d rows inserted, %d already present",
