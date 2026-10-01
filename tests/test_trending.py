@@ -152,3 +152,40 @@ def test_final_flush_of_a_closed_window_still_advances_the_commit():
 
     windows.pop_closed(final=True)
     assert windows.commit_offsets() == {0: 8}
+
+
+def test_a_partition_read_later_is_not_late_because_another_ran_ahead():
+    """After a rebalance or restart one partition can be far behind another."""
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    # Partition 0 is read first and reaches minute 30.
+    add(windows, 0, minute=0, partition=0)
+    add(windows, 1, minute=30, partition=0, title="Later")
+    # Partition 1 still has events from minute 0 to deliver.
+    assert add(windows, 0, minute=0, partition=1, title="Other page") is True
+    assert windows.late_events == 0
+    assert windows.counted == 3
+
+
+def test_lateness_still_applies_within_a_partition():
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    add(windows, 0, minute=30, partition=0)
+    assert add(windows, 1, minute=0, partition=0, title="Old") is False
+    assert windows.late_events == 1
+
+
+def test_each_partition_closes_windows_at_its_own_pace():
+    windows = MinuteWindows(lateness_ms=MINUTE_MS)
+    add(windows, 0, minute=0, partition=0)
+    add(windows, 1, minute=30, partition=0, title="Later")
+    add(windows, 0, minute=0, partition=1, title="Behind")
+    closed = {c.title for c in windows.pop_closed()}
+    # Partition 0 moved past minute 0; partition 1 has not, so its window stays open.
+    assert closed == {"Roma"}
+    assert windows.open_windows(1) == 1
+
+
+def test_reported_watermark_is_the_furthest_partition():
+    windows = MinuteWindows()
+    add(windows, 0, minute=5, partition=0)
+    add(windows, 0, minute=2, partition=1)
+    assert windows.watermark_ms == BASE + 5 * MINUTE_MS

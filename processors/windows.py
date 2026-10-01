@@ -4,6 +4,13 @@ A window closes once the stream has moved past its minute by the lateness
 allowance, measured against the largest event time seen rather than the wall
 clock, so a replay closes windows at the same points as a live run.
 
+That largest event time, the watermark, is kept per partition. Partitions
+are not read in step: after a restart or a rebalance one can be hours behind
+another. A single watermark would be set by whichever partition is furthest
+ahead, and everything still to be read on the others would look late and be
+thrown away. Every edit to a page is on one partition, so lateness only
+means something within that partition.
+
 Offsets are the interesting part. A window that is still open must be
 recomputed in full after a restart, so the committed offset for a partition
 is the lowest offset any open window depends on, not the last offset read.
@@ -53,6 +60,7 @@ class PartitionState:
     windows: Dict[WindowKey, Window] = field(default_factory=dict)
     last_offset: int = -1
     flushed_minutes: set = field(default_factory=set)
+    watermark_ms: int = 0
     # Lowest offset behind a partial total written by a final flush. The
     # commit point must never pass it, or that total stays partial forever.
     partial_floor: int = -1
@@ -71,23 +79,27 @@ class MinuteWindows:
         self.lateness_ms = lateness_ms
         self.max_windows = max_windows
         self.partitions: Dict[int, PartitionState] = {}
-        self.watermark_ms = 0
         self.late_events = 0
         self.counted = 0
 
     def state(self, partition: int) -> PartitionState:
         return self.partitions.setdefault(partition, PartitionState())
 
+    @property
+    def watermark_ms(self) -> int:
+        """The furthest any partition has got, for reporting only."""
+        return max((s.watermark_ms for s in self.partitions.values()), default=0)
+
     def add(self, partition: int, offset: int, wiki: str, title: str, event_time_ms: int) -> bool:
         """Count one edit. Returns False when the event arrived too late."""
         state = self.state(partition)
         state.last_offset = max(state.last_offset, offset)
-        self.watermark_ms = max(self.watermark_ms, event_time_ms)
+        state.watermark_ms = max(state.watermark_ms, event_time_ms)
 
         minute = minute_start(event_time_ms)
         key = (wiki, title, minute)
         already_written = minute in state.flushed_minutes and key not in state.windows
-        if minute < self.closed_before() or already_written:
+        if minute < self.closed_before(state) or already_written:
             # The minute is past the close cutoff, or was forced out by the
             # window cap, so counting this event could only produce a partial
             # total for a minute that is already written.
@@ -107,9 +119,9 @@ class MinuteWindows:
                 del state.windows[key]
             state.flushed_minutes.add(oldest)
 
-    def closed_before(self) -> int:
-        """Minutes starting before this are finished, given the lateness allowance."""
-        return minute_start(self.watermark_ms - self.lateness_ms)
+    def closed_before(self, state: PartitionState) -> int:
+        """Minutes starting before this are finished on that partition."""
+        return minute_start(state.watermark_ms - self.lateness_ms)
 
     def pop_closed(self, final: bool = False) -> list:
         """Remove and return every window the stream has moved past.
@@ -119,9 +131,9 @@ class MinuteWindows:
         partial count written here is replaced by the complete count when the
         next owner replays those events from the committed offset.
         """
-        cutoff = self.closed_before()
         closed = []
         for state in self.partitions.values():
+            cutoff = self.closed_before(state)
             done = [
                 key for key in state.windows if final or key[2] < cutoff
             ]
@@ -136,13 +148,9 @@ class MinuteWindows:
                         if state.partial_floor < 0
                         else min(state.partial_floor, window.first_offset)
                     )
-        self._trim_flushed(cutoff)
-        return closed
-
-    def _trim_flushed(self, cutoff: int) -> None:
-        """Minutes older than the cutoff are rejected anyway, so forget them."""
-        for state in self.partitions.values():
+            # Minutes older than the cutoff are rejected anyway, so forget them.
             state.flushed_minutes = {m for m in state.flushed_minutes if m >= cutoff}
+        return closed
 
     def commit_offsets(self) -> Dict[int, int]:
         """Offset to commit per partition: the oldest offset still needed."""
