@@ -20,7 +20,7 @@ from common.config import TOPIC_CLEAN, TOPIC_DLQ, TOPIC_RAW, scoped  # noqa: E40
 from common.metrics import setup_logging  # noqa: E402
 from processors.dedup import DedupCache  # noqa: E402
 from processors.transactional import TransactionalProcessor  # noqa: E402
-from processors.transform import Clean, Duplicate, Rejected, transform  # noqa: E402
+from processors.transform import Clean, Duplicate, Rejected, Skipped, transform  # noqa: E402
 from processors.warmup import CacheWarmer  # noqa: E402
 
 log = setup_logging("cleaner")
@@ -44,6 +44,7 @@ class Cleaner(TransactionalProcessor):
         self.caches = {}
         self.produced = 0
         self.duplicates = 0
+        self.skipped = 0
         self.rejected = 0
 
     def partitions_assigned(self, consumer, partitions) -> None:
@@ -108,6 +109,8 @@ class Cleaner(TransactionalProcessor):
             self.meter.mark()
         elif isinstance(result, Duplicate):
             self.duplicates += 1
+        elif isinstance(result, Skipped):
+            self.skipped += 1
         elif isinstance(result, Rejected):
             self.rejected += 1
             self.meter.mark_error()
@@ -120,7 +123,7 @@ class Cleaner(TransactionalProcessor):
     def summary(self) -> str:
         return (
             f"{self.produced} cleaned, {self.duplicates} duplicates dropped, "
-            f"{self.rejected} rejected"
+            f"{self.skipped} heartbeats skipped, {self.rejected} rejected"
         )
 
 

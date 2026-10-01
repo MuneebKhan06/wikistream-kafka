@@ -1,7 +1,8 @@
 """Turns one raw Kafka message into an outcome the cleaner can act on.
 
 Kept free of Kafka clients so the decision logic can be tested directly:
-every raw message becomes exactly one Clean, Duplicate or Rejected result.
+every raw message becomes exactly one Clean, Duplicate, Rejected or Skipped
+result.
 """
 
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Union
 
 from common.dlq import dlq_record
-from common.models import CleanEvent, ParseError, clean_event, parse_raw
+from common.models import CleanEvent, ParseError, clean_event, is_canary, parse_raw
 from processors.dedup import DedupCache
 
 
@@ -44,7 +45,14 @@ class Rejected:
         )
 
 
-Outcome = Union[Clean, Duplicate, Rejected]
+@dataclass(frozen=True)
+class Skipped:
+    """Valid input that is not an event, such as a stream heartbeat."""
+
+    reason: str
+
+
+Outcome = Union[Clean, Duplicate, Rejected, Skipped]
 
 
 def event_time_ms(event: CleanEvent, fallback_ms: Optional[int] = None) -> int:
@@ -62,6 +70,9 @@ def transform(
     """Parse, validate and deduplicate one raw message."""
     try:
         raw = parse_raw(payload)
+        if is_canary(raw):
+            # Not a failure: sending these to the DLQ would bury real ones.
+            return Skipped("canary")
         event = clean_event(raw)
     except ParseError as exc:
         return Rejected(str(exc), payload if isinstance(payload, bytes) else b"")

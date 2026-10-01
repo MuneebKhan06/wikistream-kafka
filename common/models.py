@@ -43,6 +43,17 @@ class ParseError(ValueError):
     """Raised when an event cannot be turned into a CleanEvent."""
 
 
+CANARY_DOMAIN = "canary"
+
+
+def is_canary(raw: dict) -> bool:
+    """Wikimedia injects artificial heartbeat events to prove the stream is
+    alive end to end. They are marked with meta.domain "canary", describe no
+    real change, and consumers are expected to discard them."""
+    meta = raw.get("meta")
+    return isinstance(meta, dict) and meta.get("domain") == CANARY_DOMAIN
+
+
 @dataclass(frozen=True)
 class CleanEvent:
     event_id: str
