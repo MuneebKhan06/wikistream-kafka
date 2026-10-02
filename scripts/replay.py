@@ -10,6 +10,7 @@ Usage:
   python scripts/replay.py --speed 10           # 10x the original timing
   python scripts/replay.py --rate 5000          # fixed events per second
   python scripts/replay.py --acks 1 --loops 3   # weaker durability, 3 passes
+  python scripts/replay.py --loops 50 --unique-ids   # 50 passes of distinct events
 """
 
 import argparse
@@ -20,15 +21,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from confluent_kafka import Producer  # noqa: E402
+from confluent_kafka import KafkaError, KafkaException, Producer  # noqa: E402
 
 from common.config import SAMPLES_DIR, TOPIC_RAW, producer_config  # noqa: E402
 from common.metrics import RateMeter, setup_logging  # noqa: E402
 from common.models import ParseError, event_id_of, parse_raw  # noqa: E402
+from common.topics import wait_for_topics  # noqa: E402
 
 log = setup_logging("replay")
 
 DEFAULT_SAMPLE = SAMPLES_DIR / "recentchange_sample.jsonl"
+UNKNOWN_TOPIC_GRACE_SEC = 30.0
 
 
 def load(path: Path) -> list:
@@ -76,6 +79,17 @@ def pace(records: list, index: int, started: float, args, loop: int = 0) -> None
         time.sleep(delay)
 
 
+def unique_copy(event_id: str, payload: bytes, loop: int) -> tuple:
+    """The same event under a new id, so each pass is distinct work downstream.
+
+    Repeating a file gives the cleaner events it has already seen, which it
+    drops almost for free. That is right for testing dedup, and wrong for
+    measuring throughput or building a backlog.
+    """
+    new_id = f"{event_id}-{loop}"
+    return new_id, payload.replace(event_id.encode("utf-8"), new_id.encode("utf-8"), 1)
+
+
 def producer_overrides(acks) -> dict:
     """An acks override also turns idempotence off, which requires acks=all.
 
@@ -103,10 +117,14 @@ def replay(records: list, args) -> dict:
             delivered["failed"] += 1
             meter.mark_error()
 
+    wait_for_topics(producer, [args.topic], log)
+    topic_deadline = time.monotonic() + UNKNOWN_TOPIC_GRACE_SEC
     started = time.monotonic()
     for loop in range(args.loops):
         for index, (event_id, payload, _) in enumerate(records):
             pace(records, index, started, args, loop)
+            if args.unique_ids:
+                event_id, payload = unique_copy(event_id, payload, loop)
             while True:
                 try:
                     producer.produce(
@@ -119,6 +137,13 @@ def replay(records: list, args) -> dict:
                 except BufferError:
                     # Local queue is full, which means the brokers are the limit.
                     producer.poll(0.1)
+                except KafkaException as exc:
+                    # A topic created moments ago can be unknown to the broker
+                    # this producer asked first. It clears within seconds.
+                    unknown = exc.args[0].code() == KafkaError._UNKNOWN_TOPIC
+                    if not unknown or time.monotonic() > topic_deadline:
+                        raise
+                    producer.poll(0.5)
             producer.poll(0)
         log.info("pass %d of %d sent", loop + 1, args.loops)
 
@@ -142,6 +167,11 @@ def parse_args(argv=None):
     parser.add_argument("--rate", type=float, help="fixed events per second")
     parser.add_argument("--acks", help="override producer acks, for example 1")
     parser.add_argument("--loops", type=int, default=1)
+    parser.add_argument(
+        "--unique-ids",
+        action="store_true",
+        help="give each pass new event ids, so repeats are not duplicates",
+    )
     parser.add_argument("--json", action="store_true", help="print results as json")
     return parser.parse_args(argv)
 

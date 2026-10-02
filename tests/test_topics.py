@@ -149,3 +149,43 @@ def test_a_failed_check_does_nothing():
     for _ in range(3):
         dog.check()
     assert rejoins == []
+
+
+# Rebalance protocol: cooperative adds and removes, eager replaces everything.
+
+
+class ProtocolConsumer:
+    def __init__(self):
+        self.calls = []
+
+    def incremental_assign(self, partitions):
+        self.calls.append(("incremental_assign", list(partitions)))
+
+    def incremental_unassign(self, partitions):
+        self.calls.append(("incremental_unassign", list(partitions)))
+
+    def assign(self, partitions):
+        self.calls.append(("assign", list(partitions)))
+
+    def unassign(self):
+        self.calls.append(("unassign", None))
+
+
+def test_cooperative_protocol_adds_and_removes_only_the_given_partitions(monkeypatch):
+    from common import topics
+
+    monkeypatch.setattr(topics, "COOPERATIVE", True)
+    consumer = ProtocolConsumer()
+    topics.take_partitions(consumer, [1, 2])
+    topics.release_partitions(consumer, [2])
+    assert consumer.calls == [("incremental_assign", [1, 2]), ("incremental_unassign", [2])]
+
+
+def test_eager_protocol_replaces_and_drops_the_whole_assignment(monkeypatch):
+    from common import topics
+
+    monkeypatch.setattr(topics, "COOPERATIVE", False)
+    consumer = ProtocolConsumer()
+    topics.take_partitions(consumer, [1, 2])
+    topics.release_partitions(consumer, [2])
+    assert consumer.calls == [("assign", [1, 2]), ("unassign", None)]

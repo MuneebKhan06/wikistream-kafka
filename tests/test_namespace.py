@@ -20,6 +20,9 @@ print(json.dumps({
                trending.GROUP_ID, postgres_sink.GROUP_ID, alerts_sink.GROUP_ID],
     "txn": [cleaner.transactional_id("1"), edit_war.transactional_id("1"),
             page_state.transactional_id("1")],
+    "assignor": config.consumer_config("g")["partition.assignment.strategy"],
+    "heartbeat": config.consumer_config("g")["heartbeat.interval.ms"],
+    "cooperative": config.COOPERATIVE,
     "rf": config.REPLICATION_FACTOR,
     "isr": config.MIN_INSYNC_REPLICAS,
     "checkpoint": checkpoint.DEFAULT_PATH.name,
@@ -75,3 +78,15 @@ def test_another_namespace_shares_nothing_with_production():
 def test_replication_can_be_lowered_for_a_single_broker():
     result = names(KAFKA_REPLICATION_FACTOR="1", KAFKA_MIN_INSYNC_REPLICAS="1")
     assert (result["rf"], result["isr"]) == (1, "1")
+
+
+def test_assignor_defaults_to_cooperative_sticky_and_can_be_changed():
+    assert names()["assignor"] == "cooperative-sticky"
+    assert names()["cooperative"] is True
+    eager = names(KAFKA_ASSIGNOR="range")
+    assert eager["assignor"] == "range"
+    assert eager["cooperative"] is False
+
+
+def test_heartbeat_is_tuned_for_shorter_rebalance_pauses():
+    assert names()["heartbeat"] == 1000

@@ -32,7 +32,7 @@ from typing import Callable, Iterable
 from confluent_kafka import ConsumerGroupState, KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient
 
-from common.config import admin_config
+from common.config import COOPERATIVE, admin_config
 
 WAIT_SEC = 60.0
 POLL_SEC = 1.0
@@ -62,6 +62,27 @@ def wait_for_topics(client, topics: Iterable[str], log: logging.Logger, wait_sec
             )
         time.sleep(POLL_SEC)
         missing = missing_topics(client, topics)
+
+
+def take_partitions(consumer, partitions) -> None:
+    """Accept an assignment in whichever rebalance protocol is in use.
+
+    Cooperative rebalances hand over only the partitions being added, so they
+    are added to what the consumer holds. Eager rebalances hand over the full
+    new assignment, which replaces it.
+    """
+    if COOPERATIVE:
+        consumer.incremental_assign(partitions)
+    else:
+        consumer.assign(partitions)
+
+
+def release_partitions(consumer, partitions) -> None:
+    """Give partitions up: just these when cooperative, everything when eager."""
+    if COOPERATIVE:
+        consumer.incremental_unassign(partitions)
+    else:
+        consumer.unassign()
 
 
 def check_consumer_error(msg, log: logging.Logger) -> None:

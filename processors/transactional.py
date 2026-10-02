@@ -20,7 +20,13 @@ from confluent_kafka import Consumer, KafkaException, Producer
 from common.config import consumer_config, transactional_producer_config
 from common.metrics import RateMeter, log_lag
 from common.offsets import report_retention_gaps
-from common.topics import AssignmentWatchdog, check_consumer_error, wait_for_topics
+from common.topics import (
+    AssignmentWatchdog,
+    check_consumer_error,
+    release_partitions,
+    take_partitions,
+    wait_for_topics,
+)
 
 COMMIT_INTERVAL_SEC = 0.5
 MAX_BATCH = 2000
@@ -70,7 +76,7 @@ class TransactionalProcessor:
         self.running = False
 
     def on_assign(self, consumer, partitions):
-        consumer.incremental_assign(partitions)
+        take_partitions(consumer, partitions)
         self.log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
         report_retention_gaps(self.log, consumer, partitions)
         self.partitions_assigned(consumer, partitions)
@@ -81,7 +87,7 @@ class TransactionalProcessor:
         if self.in_transaction:
             self._abort()
         self.partitions_revoked(partitions)
-        consumer.incremental_unassign(partitions)
+        release_partitions(consumer, partitions)
         self.log.info("revoked partitions: %s", sorted(p.partition for p in partitions))
 
     def _abort(self) -> None:

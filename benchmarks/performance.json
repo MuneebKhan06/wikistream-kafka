@@ -1,0 +1,41 @@
+{
+  "live_stream": {
+    "cleaner": "stopped, 6975 cleaned, 0 duplicates dropped, 0 heartbeats skipped, 0 rejected",
+    "events_per_sec": {
+      "average": 38.1,
+      "peak": 85
+    },
+    "ingestor": "stopped, 6975 events confirmed in total, 0 in flight",
+    "latency_ms": {
+      "max": 4657,
+      "p50": 1124,
+      "p95": 2291,
+      "p99": 3649
+    },
+    "ran_at": "2026-10-02T07:59:07+00:00",
+    "rows_stored": 6975,
+    "seconds_observed": 180
+  },
+  "producer_throughput": {
+    "acks_1": {
+      "events_per_sec_median": 37819,
+      "events_per_sec_runs": [
+        32803,
+        38691,
+        37819
+      ]
+    },
+    "acks_1_speedup": 2.98,
+    "acks_all_idempotent": {
+      "events_per_sec_median": 12710,
+      "events_per_sec_runs": [
+        12710,
+        12780,
+        10746
+      ]
+    },
+    "events_per_run": 100000,
+    "ran_at": "2026-10-02T07:59:07+00:00",
+    "runs": 3
+  }
+}

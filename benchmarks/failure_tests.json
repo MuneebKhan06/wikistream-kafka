@@ -1,0 +1,152 @@
+{
+  "broker-failure": {
+    "acknowledged": 30000,
+    "action": "broker 2 killed with SIGKILL while producing with acks=all",
+    "failed": 0,
+    "leadership_moved_ms": 8873,
+    "passed": true,
+    "produce_rate_per_sec": 2000,
+    "ran_at": "2026-10-02T07:51:45+00:00",
+    "records_in_topic": 30000,
+    "replicas_back_in_sync_ms": 11526,
+    "seconds": 70.5,
+    "sent": 30000
+  },
+  "cleaner-crash": {
+    "action": "cleaner exits mid transaction: output produced, offsets sent, no commit",
+    "after_crash_visible_to_read_committed": 680,
+    "after_crash_written_to_the_log": 1338,
+    "clean_records_after_restart": 2000,
+    "clean_unique_event_ids": 2000,
+    "crash_exit_code": 86,
+    "duplicate_event_ids": 0,
+    "passed": true,
+    "ran_at": "2026-10-02T07:48:52+00:00",
+    "raw_records": 6000,
+    "seconds": 53.9,
+    "uncommitted_records_left_by_the_crash": 658,
+    "unique_events": 2000
+  },
+  "ingestor-crash": {
+    "action": "ingestor killed with SIGKILL on the live stream, then restarted",
+    "confirmed_in_checkpoint_at_crash": 1165,
+    "duplicate_rate": 0.0126,
+    "duplicates_from_the_restart": 31,
+    "events_missing_from_the_source_sequence": 0,
+    "passed": true,
+    "ran_at": "2026-10-02T07:50:35+00:00",
+    "records_in_raw": 2459,
+    "records_in_raw_at_crash": 1196,
+    "resumed_from_checkpoint": true,
+    "seconds": 51.7,
+    "seconds_before_and_after": 25,
+    "unique_events": 2428
+  },
+  "scale-out": {
+    "action": "cleaner instances 2 and 3 added 12 s apart while draining a backlog",
+    "cooperative_sticky": {
+      "assignor": "cooperative-sticky",
+      "backlog_events": 120000,
+      "clean_records": 120000,
+      "clean_unique_event_ids": 120000,
+      "events_per_sec_by_instance_count": {
+        "1": 1839,
+        "2": 2586,
+        "3": 3030
+      },
+      "partition_revocations": 5,
+      "partitions_covered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "partitions_owned_at_the_end": {
+        "cleaner-1": [
+          4,
+          5
+        ],
+        "cleaner-2": [
+          1,
+          2
+        ],
+        "cleaner-3": [
+          0,
+          3
+        ]
+      },
+      "seconds_to_drain": 45.4,
+      "state_rebuilds": 9
+    },
+    "eager_range_for_comparison": {
+      "assignor": "range",
+      "backlog_events": 120000,
+      "clean_records": 120000,
+      "clean_unique_event_ids": 120000,
+      "events_per_sec_by_instance_count": {
+        "1": 3429,
+        "2": 3396,
+        "3": 2525
+      },
+      "partition_revocations": 12,
+      "partitions_covered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "partitions_owned_at_the_end": {
+        "cleaner-1": [
+          2,
+          3
+        ],
+        "cleaner-2": [
+          0,
+          1
+        ],
+        "cleaner-3": [
+          4,
+          5
+        ]
+      },
+      "seconds_to_drain": 37.4,
+      "state_rebuilds": 12
+    },
+    "passed": true,
+    "ran_at": "2026-10-02T07:55:20+00:00",
+    "seconds": 129.0
+  },
+  "sink-crash": {
+    "action": "sink exits after PostgreSQL commits a batch, before committing offsets",
+    "crash_exit_code": 86,
+    "events": 2000,
+    "partitions_with_offsets_committed_before_the_crash": 0,
+    "passed": true,
+    "ran_at": "2026-10-02T07:49:43+00:00",
+    "records_left_uncommitted_after_restart": 0,
+    "rows_after_restart": 2000,
+    "rows_reprocessed_and_skipped_after_restart": 500,
+    "rows_written_before_the_crash": 500,
+    "seconds": 51.2,
+    "unique_event_ids": 2000
+  },
+  "two-brokers-down": {
+    "acknowledged_before_the_outage": 100,
+    "acknowledged_during_the_outage": 0,
+    "acknowledged_writes_missing_after_recovery": 0,
+    "action": "brokers 2 and 3 killed, then 200 writes attempted with acks=all",
+    "attempted_during_the_outage": 200,
+    "passed": true,
+    "ran_at": "2026-10-02T07:53:11+00:00",
+    "refusal_errors": {
+      "_MSG_TIMED_OUT": 200
+    },
+    "refused_during_the_outage": 200,
+    "refused_writes_that_appeared_after_recovery": 98,
+    "seconds": 85.8
+  }
+}
