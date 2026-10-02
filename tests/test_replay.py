@@ -102,3 +102,20 @@ def test_speed_offsets_later_passes_by_the_file_span(tmp_path):
     # The file spans 2 s, plus 1 s between passes, so pass 2 starts 3 s in.
     pace(records, 0, started, args, loop=1)
     assert time.monotonic() - started >= 0.14
+
+
+def test_unique_copy_changes_the_id_in_key_and_payload():
+    from scripts.replay import unique_copy
+
+    payload = json.dumps({"meta": {"id": "abc-123"}, "title": "abc-123 in a title"}).encode()
+    new_id, new_payload = unique_copy("abc-123", payload, 4)
+    assert new_id == "abc-123-4"
+    decoded = json.loads(new_payload)
+    assert decoded["meta"]["id"] == "abc-123-4"
+    # Only the first occurrence, the id itself, is rewritten.
+    assert decoded["title"] == "abc-123 in a title"
+
+
+def test_unique_ids_is_off_by_default():
+    assert parse_args([]).unique_ids is False
+    assert parse_args(["--unique-ids"]).unique_ids is True
