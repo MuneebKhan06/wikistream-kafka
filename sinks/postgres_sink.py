@@ -23,6 +23,8 @@ from common.offsets import report_retention_gaps  # noqa: E402
 from common.topics import (  # noqa: E402
     AssignmentWatchdog,
     check_consumer_error,
+    release_partitions,
+    take_partitions,
     wait_for_topics,
 )
 from sinks.db import Database, insert_edits  # noqa: E402
@@ -67,12 +69,12 @@ class PostgresSink:
         self.running = False
 
     def on_assign(self, consumer, partitions):
-        consumer.incremental_assign(partitions)
+        take_partitions(consumer, partitions)
         log.info("assigned partitions: %s", sorted(p.partition for p in partitions))
         report_retention_gaps(log, consumer, partitions)
 
     def on_revoke(self, consumer, partitions):
-        consumer.incremental_unassign(partitions)
+        release_partitions(consumer, partitions)
         log.info("revoked partitions: %s", sorted(p.partition for p in partitions))
 
     def collect_batch(self) -> list:

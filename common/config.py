@@ -47,6 +47,13 @@ def scoped(name: str) -> str:
     return name if NAMESPACE == DEFAULT_NAMESPACE else f"{NAMESPACE}.{name}"
 
 
+# How partitions are shared out in a consumer group. Cooperative-sticky moves
+# only the partitions that have to move and lets the rest keep processing.
+# The eager assignors (range, roundrobin) revoke everything on every
+# rebalance; they are selectable so the difference can be measured.
+ASSIGNOR = os.getenv("KAFKA_ASSIGNOR", "cooperative-sticky")
+COOPERATIVE = ASSIGNOR.startswith("cooperative")
+
 # Three brokers in production. A single broker test cluster sets both to 1.
 REPLICATION_FACTOR = int(os.getenv("KAFKA_REPLICATION_FACTOR", "3"))
 MIN_INSYNC_REPLICAS = os.getenv("KAFKA_MIN_INSYNC_REPLICAS", "2")
@@ -103,7 +110,7 @@ def consumer_config(group_id: str, **overrides) -> dict:
         "enable.auto.commit": False,
         "auto.offset.reset": "earliest",
         "isolation.level": "read_committed",
-        "partition.assignment.strategy": "cooperative-sticky",
+        "partition.assignment.strategy": ASSIGNOR,
     }
     conf.update(overrides)
     return conf
