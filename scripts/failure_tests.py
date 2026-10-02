@@ -15,6 +15,8 @@ Results are printed and merged into benchmarks/failure_tests.json.
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 import time
 import uuid
@@ -216,10 +218,140 @@ def ingestor_crash() -> dict:
         }
 
 
+def broker_script(env: dict, *args) -> str:
+    """Run scripts/kill_broker.sh and return its output."""
+    done = subprocess.run(
+        [str(PROJECT_ROOT / "scripts" / "kill_broker.sh"), *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    return done.stdout + done.stderr
+
+
+def milliseconds(output: str, marker: str) -> int:
+    match = re.search(rf"{marker} (\d+) ms", output)
+    return int(match.group(1)) if match else -1
+
+
+def restore_cluster(env: dict) -> None:
+    """Bring every broker back and spread leadership again."""
+    for broker in (1, 2, 3):
+        running = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", f"kafka-{broker}"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if running != "true":
+            subprocess.run(["docker", "start", f"kafka-{broker}"], capture_output=True)
+    subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "admin" / "wait_for_leaders.py"), "insync",
+         str(int(time.time() * 1000)), "120"],
+        env=env,
+        capture_output=True,
+    )
+    broker_script(env, "rebalance")
+
+
+def broker_failure() -> dict:
+    """Hard kill one of three brokers while producing; no acknowledged write lost."""
+    rate, loops = 2000, 15
+    with Sandbox("ft", database=False) as box:
+        try:
+            box.python("admin/create_topics.py")
+            producer = box.start(
+                "scripts/replay.py",
+                "--topic", box.topic("raw"), "--rate", str(rate), "--loops", str(loops), "--json",
+                name="producer",
+            )
+            time.sleep(5)
+            killed = broker_script(box.env, "kill", "2")
+            exit_code = box.wait_exit(producer)
+            log_text = box.log_text(producer)
+            outcome = json.loads(log_text[log_text.index("{\n"):])
+
+            records = read_topic(box.topic("raw"))
+            restarted = broker_script(box.env, "start", "2")
+        finally:
+            restore_cluster(box.env)
+
+        return {
+            "action": "broker 2 killed with SIGKILL while producing with acks=all",
+            "produce_rate_per_sec": rate,
+            "sent": outcome["sent"],
+            "acknowledged": outcome["delivered"],
+            "failed": outcome["failed"],
+            "records_in_topic": len(records),
+            "leadership_moved_ms": milliseconds(killed, "leadership moved off broker 2 in"),
+            "replicas_back_in_sync_ms": milliseconds(restarted, "back in sync after"),
+            "passed": exit_code == 0
+            and outcome["failed"] == 0
+            and outcome["delivered"] == outcome["sent"] == len(records),
+        }
+
+
+def two_brokers_down() -> dict:
+    """Two of three brokers down; writes are refused, and none acknowledged is lost."""
+    from confluent_kafka import Producer
+
+    from common.config import producer_config
+
+    attempts = 200
+    with Sandbox("ft", database=False) as box:
+        topic = box.topic("raw")
+        outcomes = {}
+
+        def send(prefix: str, count: int, timeout_ms: int) -> None:
+            producer = Producer(producer_config(**{"message.timeout.ms": timeout_ms}))
+
+            def on_delivery(err, msg):
+                outcomes[msg.key().decode()] = "acknowledged" if err is None else err.name()
+
+            for i in range(count):
+                key = f"{prefix}-{i}"
+                producer.produce(topic, key=key.encode(), value=key.encode(), on_delivery=on_delivery)
+            producer.flush(timeout_ms / 1000 + 30)
+
+        try:
+            box.python("admin/create_topics.py")
+            send("before", 100, 30000)
+
+            broker_script(box.env, "kill", "2")
+            subprocess.run(["docker", "kill", "kafka-3"], capture_output=True)
+            time.sleep(3)
+            send("during", attempts, 20000)
+        finally:
+            restore_cluster(box.env)
+
+        present = {key.decode() for _, _, key, _ in read_topic(topic)}
+        during = {k: v for k, v in outcomes.items() if k.startswith("during")}
+        acknowledged = {k for k, v in during.items() if v == "acknowledged"}
+        refused = {k for k in during if k not in acknowledged}
+        before_ok = sum(1 for k, v in outcomes.items() if k.startswith("before") and v == "acknowledged")
+        return {
+            "action": "brokers 2 and 3 killed, then 200 writes attempted with acks=all",
+            "acknowledged_before_the_outage": before_ok,
+            "attempted_during_the_outage": attempts,
+            "acknowledged_during_the_outage": len(acknowledged),
+            "refused_during_the_outage": len(refused),
+            "refusal_errors": dict(Counter(during[k] for k in refused)),
+            "acknowledged_writes_missing_after_recovery": len(
+                {k for k, v in outcomes.items() if v == "acknowledged"} - present
+            ),
+            "refused_writes_that_appeared_after_recovery": len(refused & present),
+            "passed": before_ok == 100
+            and len(refused) > 0
+            and not ({k for k, v in outcomes.items() if v == "acknowledged"} - present),
+        }
+
+
 SCENARIOS = {
     "cleaner-crash": cleaner_crash,
     "sink-crash": sink_crash,
     "ingestor-crash": ingestor_crash,
+    "broker-failure": broker_failure,
+    "two-brokers-down": two_brokers_down,
 }
 
 
