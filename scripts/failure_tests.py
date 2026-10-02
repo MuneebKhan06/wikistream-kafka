@@ -346,12 +346,106 @@ def two_brokers_down() -> dict:
         }
 
 
+def owned_partitions(log_text: str) -> list:
+    """Replay a process's assign and revoke log lines to see what it ended with."""
+    owned = set()
+    for line in log_text.splitlines():
+        if "stop requested" in line:
+            break
+        match = re.search(r"(assigned|revoked) partitions: \[([0-9, ]*)\]", line)
+        if not match:
+            continue
+        partitions = {int(p) for p in match.group(2).split(",") if p.strip()}
+        if match.group(1) == "assigned":
+            owned |= partitions
+        else:
+            owned -= partitions
+    return sorted(owned)
+
+
+def scale_out_run(assignor: str, loops: int) -> dict:
+    events = SAMPLE_EVENTS * loops
+    names = ["cleaner-1", "cleaner-2", "cleaner-3"]
+    env = {"KAFKA_ASSIGNOR": assignor}
+    with Sandbox("ft", database=False) as box:
+        box.python("admin/create_topics.py")
+        box.python(
+            "scripts/replay.py", "--topic", box.topic("raw"), "--loops", str(loops), "--unique-ids"
+        )
+
+        def lag() -> int:
+            offsets = committed_offsets(box.group("cleaner"), box.topic("raw"))
+            return sum(end - max(committed, 0) for committed, end in offsets.values())
+
+        started = time.time()
+        timeline = []
+        for number, name in enumerate(names, start=1):
+            box.start("processors/cleaner.py", str(number), name=name, env=env)
+            phase_end = time.time() + 12
+            while time.time() < phase_end:
+                timeline.append((round(time.time() - started, 1), number, lag()))
+                time.sleep(2)
+        box.wait_until("the three cleaners to drain the backlog", lambda: lag() == 0)
+        drained_sec = round(time.time() - started, 1)
+        final = {name: owned_partitions(box.log_text(name)) for name in names}
+        for name in names:
+            box.stop(name)
+
+        records = read_topic(box.topic("clean"))
+        unique = len({json.loads(v)["event_id"] for _, _, _, v in records})
+
+        # Events per second while N instances were running, from the lag samples.
+        rates = {}
+        for count in (1, 2, 3):
+            samples = [(t, lagged) for t, n, lagged in timeline if n == count]
+            if len(samples) >= 2 and samples[-1][0] > samples[0][0]:
+                drop = samples[0][1] - samples[-1][1]
+                rates[str(count)] = round(drop / (samples[-1][0] - samples[0][0]))
+        logs = {name: box.log_text(name) for name in names}
+        return {
+            "assignor": assignor,
+            "backlog_events": events,
+            "partitions_owned_at_the_end": final,
+            "partitions_covered": sorted(p for owned in final.values() for p in owned),
+            "events_per_sec_by_instance_count": rates,
+            "seconds_to_drain": drained_sec,
+            "state_rebuilds": sum(text.count("warmed partition") for text in logs.values()),
+            "partition_revocations": sum(
+                len(m.split(","))
+                for text in logs.values()
+                for m in re.findall(r"revoked partitions: \[([0-9, ]+)\]", text.split("stop requested")[0])
+            ),
+            "clean_records": len(records),
+            "clean_unique_event_ids": unique,
+        }
+
+
+def scale_out() -> dict:
+    """Go from one cleaner to three under a backlog; every partition stays owned."""
+    loops = 60
+    cooperative = scale_out_run("cooperative-sticky", loops)
+    eager = scale_out_run("range", loops)
+    events = SAMPLE_EVENTS * loops
+    return {
+        "action": "cleaner instances 2 and 3 added 12 s apart while draining a backlog",
+        "cooperative_sticky": cooperative,
+        "eager_range_for_comparison": eager,
+        "passed": all(
+            run["partitions_covered"] == [0, 1, 2, 3, 4, 5]
+            and all(len(owned) == 2 for owned in run["partitions_owned_at_the_end"].values())
+            and run["clean_records"] == run["clean_unique_event_ids"] == events
+            for run in (cooperative, eager)
+        ),
+    }
+
+
 SCENARIOS = {
     "cleaner-crash": cleaner_crash,
     "sink-crash": sink_crash,
     "ingestor-crash": ingestor_crash,
     "broker-failure": broker_failure,
     "two-brokers-down": two_brokers_down,
+    "scale-out": scale_out,
 }
 
 
