@@ -21,6 +21,7 @@ print(json.dumps({
     "txn": [cleaner.transactional_id("1"), edit_war.transactional_id("1"),
             page_state.transactional_id("1")],
     "assignor": config.consumer_config("g")["partition.assignment.strategy"],
+    "heartbeat": config.consumer_config("g")["heartbeat.interval.ms"],
     "cooperative": config.COOPERATIVE,
     "rf": config.REPLICATION_FACTOR,
     "isr": config.MIN_INSYNC_REPLICAS,
@@ -85,3 +86,7 @@ def test_assignor_defaults_to_cooperative_sticky_and_can_be_changed():
     eager = names(KAFKA_ASSIGNOR="range")
     assert eager["assignor"] == "range"
     assert eager["cooperative"] is False
+
+
+def test_heartbeat_is_tuned_for_shorter_rebalance_pauses():
+    assert names()["heartbeat"] == 1000

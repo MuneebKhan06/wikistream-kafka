@@ -111,6 +111,12 @@ def consumer_config(group_id: str, **overrides) -> dict:
         "auto.offset.reset": "earliest",
         "isolation.level": "read_committed",
         "partition.assignment.strategy": ASSIGNOR,
+        # Members learn of a rebalance from a heartbeat response, and a
+        # cooperative rebalance takes two rounds, so a partition changing
+        # owner is unowned for about one heartbeat interval. Measured with
+        # scripts/rebalance_benchmark.py: 3.2 s at the client's 3 s default,
+        # 1.05 s at 1 s, and no better at 500 ms.
+        "heartbeat.interval.ms": 1000,
     }
     conf.update(overrides)
     return conf
