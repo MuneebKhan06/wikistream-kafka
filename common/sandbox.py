@@ -118,6 +118,25 @@ def produce(topic: str, records) -> None:
         raise RuntimeError(f"records left undelivered to {topic}")
 
 
+def committed_offsets(group: str, topic: str) -> dict:
+    """{partition: (committed offset or -1 if none, end offset)} for a group."""
+    from confluent_kafka import Consumer, TopicPartition
+
+    from common.config import consumer_config
+
+    consumer = Consumer(consumer_config(group, **{"group.id": group}))
+    try:
+        count = len(consumer.list_topics(topic, timeout=10).topics[topic].partitions)
+        parts = [TopicPartition(topic, p) for p in range(count)]
+        result = {}
+        for tp in consumer.committed(parts, timeout=10):
+            _, high = consumer.get_watermark_offsets(tp, timeout=10, cached=False)
+            result[tp.partition] = (tp.offset if tp.offset >= 0 else -1, high)
+        return result
+    finally:
+        consumer.close()
+
+
 def group_caught_up(group: str, topic: str) -> bool:
     """Committed offsets of a group have reached the end of every partition."""
     from confluent_kafka import Consumer, TopicPartition
