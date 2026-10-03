@@ -6,7 +6,9 @@ pipeline stored in PostgreSQL and Kafka and never writes to either.
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from confluent_kafka.admin import AdminClient
 from fastapi import FastAPI, Query
@@ -63,5 +65,40 @@ def create_app(db: Database = None, admin: AdminClient = None) -> FastAPI:
     def overview(minutes: int = Query(60, ge=1, le=queries.MAX_MINUTES)):
         minutes = queries.clamp_minutes(minutes)
         return cache.get(("overview", minutes), lambda: queries.overview(db, minutes))
+
+    @app.get("/api/trending")
+    def trending(
+        minutes: int = Query(60, ge=1, le=queries.MAX_MINUTES),
+        wiki: Optional[str] = Query(None, max_length=64),
+        limit: int = Query(15, ge=1, le=50),
+    ):
+        minutes = queries.clamp_minutes(minutes)
+        return cache.get(
+            ("trending", minutes, wiki, limit),
+            lambda: queries.trending(db, minutes, wiki, limit),
+        )
+
+    @app.get("/api/wikis")
+    def wikis(
+        minutes: int = Query(60, ge=1, le=queries.MAX_MINUTES),
+        limit: int = Query(20, ge=1, le=100),
+    ):
+        minutes = queries.clamp_minutes(minutes)
+        return cache.get(("wikis", minutes, limit), lambda: queries.wikis(db, minutes, limit))
+
+    @app.get("/api/edits")
+    def edits(
+        limit: int = Query(50, ge=1, le=200),
+        wiki: Optional[str] = Query(None, max_length=64),
+        humans_only: bool = False,
+        reverts_only: bool = False,
+        before: Optional[datetime] = None,
+    ):
+        # Not cached: the feed is the one view meant to be up to the second.
+        return queries.latest_edits(db, limit, wiki, humans_only, reverts_only, before)
+
+    @app.get("/api/alerts")
+    def alerts(limit: int = Query(50, ge=1, le=200)):
+        return cache.get(("alerts", limit), lambda: queries.alerts(db, limit))
 
     return app
