@@ -377,3 +377,197 @@ select {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Filter row: one row, above everything it scopes. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  padding: 5px 11px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 13px;
+}
+.segmented button:hover {
+  background: var(--hover);
+}
+.segmented button.selected {
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.field select,
+.field input[type="search"],
+.field input[type="text"] {
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  min-width: 0;
+}
+.field input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Stat tiles and the one hero figure. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+.stat {
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+.stat-label {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.stat-value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.stat-detail {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.stat-hero {
+  grid-column: span 2;
+}
+.stat-hero .stat-value {
+  font-size: 48px;
+  line-height: 1.05;
+}
+@media (max-width: 520px) {
+  .stat-hero {
+    grid-column: span 1;
+  }
+}
+
+/* Charts: recessive chrome, ink for text, color only on marks. */
+.chart {
+  width: 100%;
+  min-width: 0;
+}
+.axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.end-label {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+.bar-label {
+  fill: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mark {
+  transition: opacity 0.12s;
+}
+.mark-hover {
+  opacity: 0.75;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 120px;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-size: 12.5px;
+}
+.tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.tooltip-row strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+.tooltip-key {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  flex: none;
+}
+
+/* Tables: the chart's twin, and the feeds. */
+.table-scroll {
+  overflow-x: auto;
+}
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.data th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+}
+table.data td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--grid);
+  vertical-align: top;
+}
+table.data tr:last-child td {
+  border-bottom: 0;
+}
+table.data .right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.data tbody tr:hover {
+  background: var(--hover);
+}
