@@ -661,3 +661,83 @@ table.data tbody tr:hover {
     display: none;
   }
 }
+
+/* Badges: an icon and a word, in ink, on a faint wash. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--hover);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+/* Feeds: a fixed layout, so long titles and summaries wrap or truncate inside
+   their own column instead of widening the table or spilling into the next. */
+table.fixed {
+  table-layout: fixed;
+}
+table.fixed td {
+  overflow: hidden;
+}
+.col-time {
+  width: 104px;
+}
+.col-num {
+  width: 90px;
+}
+.col-rev {
+  /* Wikidata and Commons revision ids run to ten digits. */
+  width: 120px;
+}
+.col-user {
+  width: 18%;
+}
+.col-page {
+  width: 32%;
+}
+.feed-page a,
+.feed-user bdi,
+td bdi {
+  overflow-wrap: anywhere;
+}
+.feed-meta {
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0;
+}
+.feed-meta .type {
+  margin-left: 6px;
+}
+.feed-comment {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+td.nowrap {
+  white-space: nowrap;
+}
+@keyframes arrive {
+  from {
+    background: var(--accent-wash);
+  }
+  to {
+    background: transparent;
+  }
+}
+.feed tr.fresh td {
+  animation: arrive 2.5s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed tr.fresh td {
+    animation: none;
+  }
+}

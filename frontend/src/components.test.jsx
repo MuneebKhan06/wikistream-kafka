@@ -146,3 +146,79 @@ describe("Trending", () => {
     );
   });
 });
+
+describe("LiveEdits", () => {
+  const edit = {
+    event_id: "e1", wiki: "enwiki", title: "Superpower", type: "edit", user: "Curbon7",
+    bot: false, minor: false, is_revert: true, comment: "Adding {{pp-vandalism}}",
+    size_change: -1, event_time: new Date().toISOString(), stored_after_ms: 1200,
+    url: "https://en.wikipedia.org/wiki/Superpower",
+  };
+
+  it("shows edits with their flags and asks for filtered feeds", async () => {
+    const { LiveEdits } = await import("./pages/LiveEdits.jsx");
+    const fetchSpy = mockFetch({
+      "/api/edits": { edits: [edit], next_before: null },
+      "/api/wikis": { minutes: 60, wikis: [] },
+    });
+    render(<MemoryRouter><LiveEdits /></MemoryRouter>);
+    expect(await screen.findByRole("link", { name: "Superpower" })).toBeInTheDocument();
+    expect(screen.getByText("revert")).toBeInTheDocument();
+    expect(screen.getByText("−1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Reverts only" }));
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("reverts_only=true"))).toBe(true),
+    );
+  });
+
+  it("stops refreshing while paused", async () => {
+    const { LiveEdits } = await import("./pages/LiveEdits.jsx");
+    mockFetch({ "/api/edits": { edits: [edit] }, "/api/wikis": { wikis: [] } });
+    render(<MemoryRouter><LiveEdits /></MemoryRouter>);
+    const pause = await screen.findByRole("button", { name: "Pause" });
+    fireEvent.click(pause);
+    expect(screen.getByRole("button", { name: "Resume" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Paused/)).toBeInTheDocument();
+  });
+});
+
+describe("EditWars", () => {
+  it("lists each war with who reverted and how long it lasted", async () => {
+    const { EditWars } = await import("./pages/EditWars.jsx");
+    mockFetch({
+      "/api/alerts": {
+        alerts: [{
+          alert_id: "a1", wiki: "enwiki", title: "VeggieTales", revert_count: 3,
+          users: ["ClueBot NG", "TobyKohlhagen"], window_start: new Date().toISOString(),
+          window_end: new Date().toISOString(), minutes: 1.5,
+        }],
+      },
+    });
+    render(<MemoryRouter><EditWars /></MemoryRouter>);
+    const link = await screen.findByRole("link", { name: "VeggieTales" });
+    expect(link.getAttribute("href")).toContain("action=history");
+    expect(screen.getByText("1.5 min")).toBeInTheDocument();
+    expect(screen.getByText("TobyKohlhagen")).toBeInTheDocument();
+  });
+});
+
+describe("Pages", () => {
+  it("shows the snapshot state and searches by title", async () => {
+    const { Pages } = await import("./pages/Pages.jsx");
+    const fetchSpy = mockFetch({
+      "/api/pages": {
+        snapshot: { pages: 194000, records_read: 196100, tombstones: 749, records_per_page: 1.01, caught_up: true, error: null },
+        pages: [{ wiki: "enwiki", title: "Paris", type: "edit", user: "Alice", bot: false,
+          is_revert: false, comment: "c", event_time: new Date().toISOString(), rev_id: 1282721325, length: 5953 }],
+      },
+    });
+    render(<MemoryRouter><Pages /></MemoryRouter>);
+    expect(await screen.findByText("Caught up, following live")).toBeInTheDocument();
+    expect(screen.getByText("1282721325")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search page titles" }), { target: { value: "Paris" } });
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("q=Paris"))).toBe(true),
+    );
+  });
+});
