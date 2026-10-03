@@ -102,3 +102,47 @@ describe("Overview", () => {
     );
   });
 });
+
+describe("BarList", () => {
+  it("shows a row's tooltip on keyboard focus and names each row for screen readers", async () => {
+    const { BarList } = await import("./charts/BarList.jsx");
+    render(
+      <BarList
+        rows={[
+          { key: "a", label: "Paris", value: 40 },
+          { key: "b", label: "Rome", value: 10 },
+        ]}
+        ariaLabel="pages"
+        renderTooltip={(row) => <span>tip for {row.label}</span>}
+      />,
+    );
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0]).toHaveAccessibleName("Paris: 40");
+    fireEvent.focus(rows[1]);
+    expect(screen.getByRole("status")).toHaveTextContent("tip for Rome");
+    fireEvent.blur(rows[1]);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+describe("Trending", () => {
+  it("lists pages with links to their wiki and filters by wiki", async () => {
+    const { Trending } = await import("./pages/Trending.jsx");
+    const fetchSpy = mockFetch({
+      "/api/trending": {
+        minutes: 60,
+        newest_minute: new Date().toISOString(),
+        pages: [{ wiki: "enwiki", title: "New York", edits: 12, per_minute: [1, 2, 9] }],
+      },
+      "/api/wikis": { minutes: 60, wikis: [{ wiki: "enwiki", edits: 900, bot_edits: 300 }] },
+    });
+    render(<MemoryRouter><Trending /></MemoryRouter>);
+    const link = await screen.findByRole("link", { name: "New York" });
+    expect(link).toHaveAttribute("href", "https://en.wikipedia.org/wiki/New_York");
+
+    fireEvent.click(await screen.findByRole("button", { name: "enwiki" }));
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("wiki=enwiki"))).toBe(true),
+    );
+  });
+});

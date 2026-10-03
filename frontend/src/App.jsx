@@ -1,8 +1,12 @@
 import { Link, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout.jsx";
 import { Overview } from "./pages/Overview.jsx";
+import { Trending } from "./pages/Trending.jsx";
 
-export const ROUTES = [{ path: "/", element: <Overview /> }];
+export const ROUTES = [
+  { path: "/", element: <Overview /> },
+  { path: "/trending", element: <Trending /> },
+];
 
 function NotFound() {
   return (

@@ -321,6 +321,7 @@ select {
 }
 
 .icon-button {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -570,4 +571,93 @@ table.data .right {
 }
 table.data tbody tr:hover {
   background: var(--hover);
+}
+
+/* Ranked bars: label, bar with its value at the tip, optional extra column. */
+.barlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.barlist-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  outline-offset: -2px;
+}
+.barlist-row.hovered {
+  background: var(--hover);
+}
+.barlist-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.barlist-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.barlist-bar {
+  height: 14px;
+  background: var(--accent);
+  /* Square at the baseline, a 4px rounded data end. */
+  border-radius: 0 4px 4px 0;
+  flex: none;
+  max-width: calc(100% - 52px);
+}
+.barlist-value {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.barlist-extra {
+  display: flex;
+  align-items: center;
+}
+.barlist-tooltip {
+  top: calc(100% - 4px);
+  left: 30%;
+}
+.page-label {
+  display: inline;
+}
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* A main card beside a narrower companion; stacked on smaller screens. */
+.grid-wide-narrow {
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+}
+@media (max-width: 1100px) {
+  .grid-wide-narrow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  /* Titles need the room more than the trend line; the table keeps every value. */
+  .barlist-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .barlist-extra {
+    display: none;
+  }
 }
