@@ -98,6 +98,35 @@ services:
       kafka-3:
         condition: service_healthy
 
+  # The dashboard: React app and API in one container. Inside the compose
+  # network it reaches the brokers on their internal listeners and PostgreSQL
+  # by service name.
+  web:
+    build: .
+    image: wikistream-web
+    container_name: wikistream-web
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8050"
+    ports:
+      - "${WEB_PORT:-8050}:8050"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   kafka1-data:
   kafka2-data:

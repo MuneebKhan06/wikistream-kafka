@@ -222,3 +222,51 @@ describe("Pages", () => {
     );
   });
 });
+
+describe("Pipeline", () => {
+  const group = (name, lag, members, extra = {}) => ({
+    group: name, topic: "wiki.clean", state: members ? "stable" : "empty", members, lag,
+    caught_up: lag <= 6, partitions: [{ partition: 0, committed: 1, end: 1 + lag, lag }], ...extra,
+  });
+
+  it("tells live operation apart from a real backlog", async () => {
+    const { Pipeline } = await import("./pages/Pipeline.jsx");
+    mockFetch({
+      "/api/pipeline": {
+        brokers: { up: [1, 2, 3], expected: 3, controller: 3 },
+        partitions: { total: 22, under_replicated: 0, leaderless: 0 },
+        topics: [{ topic: "wiki.clean", partitions: 6, under_replicated: 0, leaderless: 0, leaders_by_broker: { 1: 2, 2: 2, 3: 2 } }],
+        groups: [
+          group("cleaner", 16, 1),
+          group("trending", 5384, 1),
+          group("storage", 250000, 1),
+          group("edit-wars", 277457, 0),
+        ],
+        dlq_records: 10,
+      },
+      "/api/benchmarks": { failure_tests: { "sink-crash": { action: "sink exits", passed: true } } },
+    });
+    render(<MemoryRouter><Pipeline /></MemoryRouter>);
+    expect(await screen.findByText("3 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByText("Live, holding open minutes")).toBeInTheDocument();
+    expect(screen.getByText("Catching up")).toBeInTheDocument();
+    expect(screen.getByText("Behind, not running")).toBeInTheDocument();
+    expect(await screen.findByText("Passed")).toBeInTheDocument();
+  });
+
+  it("flags missing brokers and leaderless partitions", async () => {
+    const { Pipeline } = await import("./pages/Pipeline.jsx");
+    mockFetch({
+      "/api/pipeline": {
+        brokers: { up: [1], expected: 3, controller: 1 },
+        partitions: { total: 22, under_replicated: 10, leaderless: 4 },
+        topics: [], groups: [], dlq_records: 0,
+      },
+      "/api/benchmarks": {},
+    });
+    render(<MemoryRouter><Pipeline /></MemoryRouter>);
+    expect(await screen.findByText("Down: 2")).toBeInTheDocument();
+    expect(screen.getByText("4 without a leader")).toBeInTheDocument();
+  });
+});

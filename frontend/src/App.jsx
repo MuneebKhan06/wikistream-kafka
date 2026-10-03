@@ -4,6 +4,7 @@ import { EditWars } from "./pages/EditWars.jsx";
 import { LiveEdits } from "./pages/LiveEdits.jsx";
 import { Overview } from "./pages/Overview.jsx";
 import { Pages } from "./pages/Pages.jsx";
+import { Pipeline } from "./pages/Pipeline.jsx";
 import { Trending } from "./pages/Trending.jsx";
 
 export const ROUTES = [
@@ -12,6 +13,7 @@ export const ROUTES = [
   { path: "/edits", element: <LiveEdits /> },
   { path: "/edit-wars", element: <EditWars /> },
   { path: "/pages", element: <Pages /> },
+  { path: "/pipeline", element: <Pipeline /> },
 ];
 
 function NotFound() {
