@@ -6,6 +6,7 @@ pipeline stored in PostgreSQL and Kafka and never writes to either.
 
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +14,8 @@ from typing import Optional
 
 from confluent_kafka.admin import AdminClient
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from common.config import PROJECT_ROOT, admin_config
 from web import cluster, queries
@@ -22,10 +24,9 @@ from web.db import Database
 from web.pages import PageStore
 
 BENCHMARKS_DIR = PROJECT_ROOT / "benchmarks"
+FRONTEND_DIST = Path(os.getenv("WEB_FRONTEND_DIR", str(PROJECT_ROOT / "frontend" / "dist")))
 
 CACHE_SECONDS = 5.0
-
-STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 log = logging.getLogger("web")
 
@@ -57,7 +58,10 @@ def page_json(page) -> dict:
 
 
 def create_app(
-    db: Database = None, admin: AdminClient = None, pages: PageStore = None
+    db: Database = None,
+    admin: AdminClient = None,
+    pages: PageStore = None,
+    frontend_dir: Path = FRONTEND_DIST,
 ) -> FastAPI:
     db = db or Database()
     admin = admin or AdminClient(admin_config())
@@ -160,4 +164,51 @@ def create_app(
     def alerts(limit: int = Query(50, ge=1, le=200)):
         return cache.get(("alerts", limit), lambda: queries.alerts(db, limit))
 
+    serve_frontend(app, frontend_dir)
     return app
+
+
+def serve_frontend(app: FastAPI, dist: Path) -> None:
+    """Serve the built React app from the same origin as the API.
+
+    Built assets have content hashes in their names, so they can be cached
+    for good. index.html is never cached, so a new build is picked up on the
+    next load. Any other path that is not an API route gets index.html, and
+    the app's router shows the right view, so reloading /trending works.
+    """
+    index = dist / "index.html"
+
+    @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+    def unknown_api(path: str):
+        raise HTTPException(404, f"no such endpoint: /api/{path}")
+
+    if not index.exists():
+        @app.get("/{path:path}", include_in_schema=False)
+        def not_built(path: str):
+            return HTMLResponse(
+                "<!doctype html><title>WikiStream</title>"
+                "<p>The dashboard has not been built yet. In <code>frontend/</code> run "
+                "<code>npm install</code> and <code>npm run build</code>, then reload.</p>"
+                "<p>The API is up: <a href='/api/docs'>/api/docs</a>.</p>",
+                status_code=503,
+            )
+        return
+
+    assets = dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", ImmutableStaticFiles(directory=assets), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend(path: str):
+        candidate = (dist / path).resolve()
+        if path and candidate.is_file() and dist.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+
+class ImmutableStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response

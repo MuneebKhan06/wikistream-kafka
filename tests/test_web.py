@@ -261,3 +261,64 @@ def test_benchmarks_endpoint_serves_the_recorded_results():
     api = TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=FakePageStore()))
     body = api.get("/api/benchmarks").json()
     assert {"failure_tests", "performance", "rebalance"} <= set(body)
+
+
+# Serving the built React app.
+
+
+def built_app(tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><div id=root></div>")
+    (dist / "assets" / "app-1234.js").write_text("console.log(1)")
+    (dist / "favicon.svg").write_text("<svg/>")
+    return TestClient(
+        create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=FakePageStore(), frontend_dir=dist)
+    )
+
+
+def test_index_is_served_and_never_cached(tmp_path):
+    response = built_app(tmp_path).get("/")
+    assert response.status_code == 200
+    assert "id=root" in response.text
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_app_routes_fall_back_to_the_index(tmp_path):
+    response = built_app(tmp_path).get("/trending")
+    assert response.status_code == 200
+    assert "id=root" in response.text
+
+
+def test_hashed_assets_are_cached_for_good(tmp_path):
+    response = built_app(tmp_path).get("/assets/app-1234.js")
+    assert response.status_code == 200
+    assert "immutable" in response.headers["cache-control"]
+
+
+def test_root_files_are_served_as_themselves(tmp_path):
+    response = built_app(tmp_path).get("/favicon.svg")
+    assert response.text == "<svg/>"
+
+
+def test_unknown_api_paths_stay_json_404s(tmp_path):
+    response = built_app(tmp_path).get("/api/nothing-here")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_paths_cannot_escape_the_build_directory(tmp_path):
+    (tmp_path / "secret.txt").write_text("private")
+    response = built_app(tmp_path).get("/..%2Fsecret.txt")
+    assert "private" not in response.text
+
+
+def test_an_unbuilt_frontend_says_how_to_build_it(tmp_path):
+    api = TestClient(
+        create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=FakePageStore(),
+                   frontend_dir=tmp_path / "missing")
+    )
+    response = api.get("/")
+    assert response.status_code == 503
+    assert "npm run build" in response.text
+    assert api.get("/api/health").status_code == 200
