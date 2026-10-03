@@ -14,11 +14,21 @@ CREATE TABLE IF NOT EXISTS edits (
     length_old   INTEGER,
     length_new   INTEGER,
     server_name  TEXT        NOT NULL,
-    ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_revert    BOOLEAN
 );
+
+-- Added after the first release. Safe to run again on an existing database:
+-- rows stored before it have NULL, meaning not known.
+ALTER TABLE edits ADD COLUMN IF NOT EXISTS is_revert BOOLEAN;
 
 CREATE INDEX IF NOT EXISTS idx_edits_page_time ON edits (wiki, title, event_time);
 CREATE INDEX IF NOT EXISTS idx_edits_time ON edits (event_time);
+-- The dashboard's latest edits on one wiki.
+CREATE INDEX IF NOT EXISTS idx_edits_wiki_time ON edits (wiki, event_time);
+-- Reverts are under one percent of edits, so a filter on them would walk a
+-- long way back through the time index. This index holds only the reverts.
+CREATE INDEX IF NOT EXISTS idx_edits_reverts ON edits (event_time) WHERE is_revert;
 
 CREATE TABLE IF NOT EXISTS trending_minutes (
     wiki        TEXT        NOT NULL,

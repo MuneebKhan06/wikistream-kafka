@@ -20,7 +20,7 @@ INSERT_EDITS = """
     INSERT INTO edits (
         event_id, wiki, title, type, namespace, username, bot, minor,
         comment, event_time, rev_old, rev_new, length_old, length_new,
-        server_name
+        server_name, is_revert
     )
     VALUES %s
     ON CONFLICT (event_id) DO NOTHING
@@ -81,6 +81,7 @@ def as_row(event: CleanEvent) -> tuple:
         event.length_old,
         event.length_new,
         event.server_name,
+        event.is_revert,
     )
 
 

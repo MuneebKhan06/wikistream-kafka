@@ -34,7 +34,8 @@ def test_row_matches_insert_column_order():
     assert row[5] == "Alice"
     assert row[6:8] == (False, True)
     assert row[10:14] == (1, 2, 10, 25)
-    assert len(row) == 15
+    assert row[15] is False
+    assert len(row) == 16
 
 
 def test_empty_batches_touch_no_connection():

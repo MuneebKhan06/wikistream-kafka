@@ -57,6 +57,54 @@ jobs:
       - name: Tests
         run: pytest -q
 
+  frontend:
+    name: Dashboard tests and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  image:
+    name: Dashboard container image
+    runs-on: ubuntu-latest
+    needs: [test, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build runs the frontend tests too, so a broken app cannot ship.
+      - name: Build
+        run: docker build -t wikistream-web .
+
+      - name: Starts and serves the app without Kafka or PostgreSQL
+        run: |
+          docker run -d --name web -p 8050:8050 wikistream-web
+          for attempt in $(seq 1 30); do
+            if curl -s http://127.0.0.1:8050/ | grep -q "<title>WikiStream</title>"; then
+              echo "served after $attempt tries"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs web
+          exit 1
+
   e2e:
     name: End to end pipeline
     runs-on: ubuntu-latest

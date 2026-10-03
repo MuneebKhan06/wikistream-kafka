@@ -221,3 +221,6 @@ state/
 # Runtime files written by scripts/pipeline.sh
 logs/
 run/
+
+# Frontend
+frontend/node_modules/

@@ -21,11 +21,13 @@ PYTHON="$ROOT/.venv/bin/python"
 LOG_DIR="$ROOT/logs"
 RUN_DIR="$ROOT/run"
 STOP_TIMEOUT_SEC="${STOP_TIMEOUT_SEC:-60}"
+START_CHECK_SEC="${START_CHECK_SEC:-1.5}"
 
 cd "$ROOT"
 
-# Start order follows the data: the source first, sinks last.
-NAMES=(ingestor cleaner page_state edit_war trending postgres_sink alerts_sink)
+# Start order follows the data: the source first, sinks last, then the
+# dashboard that reads what they produced.
+NAMES=(ingestor cleaner page_state edit_war trending postgres_sink alerts_sink web)
 
 script_for() {
     case "$1" in
@@ -36,6 +38,7 @@ script_for() {
         trending) echo "processors/trending.py" ;;
         postgres_sink) echo "sinks/postgres_sink.py" ;;
         alerts_sink) echo "sinks/alerts_sink.py" ;;
+        web) echo "web/__main__.py" ;;
         *)
             echo "unknown process: $1 (known: ${NAMES[*]})" >&2
             return 1
@@ -60,13 +63,26 @@ start_one() {
         echo "$name already running (pid $pid)"
         return
     fi
+    if [ "$name" = web ] && [ ! -f "$ROOT/frontend/dist/index.html" ]; then
+        echo "note: the dashboard is not built; run 'npm install && npm run build' in frontend/"
+    fi
     mkdir -p "$LOG_DIR" "$RUN_DIR"
     # Backgrounding the command itself, not a list containing it, so $! is
     # the python process. Backgrounding `cd ... && python ...` would record
     # the wrapping subshell, and stop would kill that and leave python running.
     nohup "$PYTHON" "$ROOT/$script" >>"$LOG_DIR/$name.log" 2>&1 &
-    echo $! >"$RUN_DIR/$name.pid"
-    echo "$name started (pid $(cat "$RUN_DIR/$name.pid"))"
+    pid=$!
+    echo "$pid" >"$RUN_DIR/$name.pid"
+    # A process that fails at startup (a port in use, a missing topic) exits
+    # within a moment. Report that instead of a start that did not happen.
+    sleep "$START_CHECK_SEC"
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$RUN_DIR/$name.pid"
+        echo "$name failed to start; last lines of logs/$name.log:"
+        tail -n 5 "$LOG_DIR/$name.log" | sed 's/^/    /'
+        return 1
+    fi
+    echo "$name started (pid $pid)"
 }
 
 stop_one() {
@@ -115,7 +131,9 @@ shift || true
 
 case "$ACTION" in
     start)
-        for name in $(selected "$@"); do start_one "$name"; done
+        failed=0
+        for name in $(selected "$@"); do start_one "$name" || failed=1; done
+        exit "$failed"
         ;;
     stop)
         # Same order as start: the source stops first, then each stage
