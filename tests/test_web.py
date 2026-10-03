@@ -46,7 +46,9 @@ class FakeAdmin:
 
 
 def client(db=None, admin=None):
-    return TestClient(create_app(db=db or FakeDatabase(), admin=admin or FakeAdmin()))
+    return TestClient(
+        create_app(db=db or FakeDatabase(), admin=admin or FakeAdmin(), pages=FakePageStore())
+    )
 
 
 def test_health_is_ok_when_both_stores_answer():
@@ -180,3 +182,82 @@ def test_feed_endpoint_validates_its_parameters():
     assert api.get("/api/edits?before=not-a-time").status_code == 422
     assert api.get("/api/edits?humans_only=true&reverts_only=true").status_code == 200
     assert api.get("/api/trending?limit=51").status_code == 422
+
+
+# Kafka backed endpoints, with a fake page store and no broker.
+
+
+class FakePageStore:
+    def __init__(self, pages=()):
+        self.pages = {f"{p.wiki}:{p.title}": p for p in pages}
+        self.started = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        pass
+
+    def get(self, wiki, title):
+        return self.pages.get(f"{wiki}:{title}")
+
+    def search(self, query, wiki=None, limit=20):
+        return [p for p in self.pages.values() if query.lower() in p.title.lower()][:limit]
+
+    def stats(self):
+        return {"pages": len(self.pages), "caught_up": True}
+
+
+def make_page(title, wiki="enwiki"):
+    from processors.page_latest import PageLatest
+
+    return PageLatest(
+        wiki=wiki, title=title, event_id="e", type="edit", user="Alice", bot=False,
+        minor=False, is_revert=False, comment="c", event_time="2026-10-03T10:00:00+00:00",
+        rev_id=7, length=100,
+    )
+
+
+def test_page_lookup_and_search():
+    store = FakePageStore([make_page("Paris"), make_page("Paris Hilton"), make_page("Rome")])
+    api = TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=store))
+    assert api.get("/api/pages/enwiki/Paris").json()["rev_id"] == 7
+    found = api.get("/api/pages?q=paris").json()
+    assert {p["title"] for p in found["pages"]} == {"Paris", "Paris Hilton"}
+    assert found["snapshot"]["pages"] == 3
+
+
+def test_a_title_with_a_slash_is_one_page():
+    store = FakePageStore([make_page("AC/DC")])
+    api = TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=store))
+    assert api.get("/api/pages/enwiki/AC/DC").json()["title"] == "AC/DC"
+
+
+def test_a_missing_page_is_a_404():
+    api = TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=FakePageStore()))
+    assert api.get("/api/pages/enwiki/Nowhere").status_code == 404
+
+
+def test_the_page_store_starts_with_the_app():
+    store = FakePageStore()
+    with TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=store)):
+        assert store.started
+
+
+def test_page_store_applies_records_and_tombstones():
+    from web.pages import PageStore
+
+    store = PageStore(topic="unused")
+    store.apply(b"enwiki:Paris", make_page("Paris").to_json())
+    store.apply(b"enwiki:Rome", make_page("Rome").to_json())
+    store.apply(b"enwiki:Rome", None)
+    assert store.get("enwiki", "Paris").rev_id == 7
+    assert store.get("enwiki", "Rome") is None
+    stats = store.stats()
+    assert (stats["pages"], stats["records_read"], stats["tombstones"]) == (1, 3, 1)
+
+
+def test_benchmarks_endpoint_serves_the_recorded_results():
+    api = TestClient(create_app(db=FakeDatabase(), admin=FakeAdmin(), pages=FakePageStore()))
+    body = api.get("/api/benchmarks").json()
+    assert {"failure_tests", "performance", "rebalance"} <= set(body)

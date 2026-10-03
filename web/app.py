@@ -4,6 +4,7 @@ Run with `python -m web`. Everything is read only: the API reads what the
 pipeline stored in PostgreSQL and Kafka and never writes to either.
 """
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -11,13 +12,16 @@ from pathlib import Path
 from typing import Optional
 
 from confluent_kafka.admin import AdminClient
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from common.config import admin_config
-from web import queries
+from common.config import PROJECT_ROOT, admin_config
+from web import cluster, queries
 from web.cache import TTLCache
 from web.db import Database
+from web.pages import PageStore
+
+BENCHMARKS_DIR = PROJECT_ROOT / "benchmarks"
 
 CACHE_SECONDS = 5.0
 
@@ -35,12 +39,35 @@ def kafka_reachable(admin: AdminClient) -> bool:
         return False
 
 
-def create_app(db: Database = None, admin: AdminClient = None) -> FastAPI:
+def page_json(page) -> dict:
+    return {
+        "wiki": page.wiki,
+        "title": page.title,
+        "event_id": page.event_id,
+        "type": page.type,
+        "user": page.user,
+        "bot": page.bot,
+        "minor": page.minor,
+        "is_revert": page.is_revert,
+        "comment": page.comment,
+        "event_time": page.event_time,
+        "rev_id": page.rev_id,
+        "length": page.length,
+    }
+
+
+def create_app(
+    db: Database = None, admin: AdminClient = None, pages: PageStore = None
+) -> FastAPI:
     db = db or Database()
     admin = admin or AdminClient(admin_config())
+    pages = pages if pages is not None else PageStore()
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        pages.start()
         yield
+        pages.stop()
         db.close()
 
     app = FastAPI(
@@ -96,6 +123,38 @@ def create_app(db: Database = None, admin: AdminClient = None) -> FastAPI:
     ):
         # Not cached: the feed is the one view meant to be up to the second.
         return queries.latest_edits(db, limit, wiki, humans_only, reverts_only, before)
+
+    @app.get("/api/pipeline")
+    def pipeline():
+        return cache.get(("pipeline",), lambda: cluster.pipeline(admin))
+
+    @app.get("/api/pages")
+    def search_pages(
+        q: str = Query("", max_length=200),
+        wiki: Optional[str] = Query(None, max_length=64),
+        limit: int = Query(20, ge=1, le=100),
+    ):
+        return {
+            "snapshot": pages.stats(),
+            "pages": [page_json(page) for page in pages.search(q, wiki, limit)],
+        }
+
+    @app.get("/api/pages/{wiki}/{title:path}")
+    def get_page(wiki: str, title: str):
+        page = pages.get(wiki, title)
+        if page is None:
+            raise HTTPException(404, "not in the snapshot: never edited, or deleted")
+        return page_json(page)
+
+    @app.get("/api/benchmarks")
+    def benchmarks():
+        results = {}
+        for path in sorted(BENCHMARKS_DIR.glob("*.json")):
+            try:
+                results[path.stem] = json.loads(path.read_text())
+            except (OSError, ValueError) as exc:
+                log.warning("could not read %s: %s", path.name, exc)
+        return results
 
     @app.get("/api/alerts")
     def alerts(limit: int = Query(50, ge=1, le=200)):
