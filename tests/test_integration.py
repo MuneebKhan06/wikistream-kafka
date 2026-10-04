@@ -178,6 +178,11 @@ def test_sample_flows_through_the_whole_pipeline(run):
 
     dlq = scan(f"{ns}.dlq", "stage")
     assert dlq["records"] == 1
+    # The dashboard counts it the same way, not by offsets: the cleaner writes
+    # the DLQ in transactions, and each commit marker takes an offset too.
+    from web.cluster import count_records
+
+    assert count_records(f"{ns}.dlq", 1) == 1
 
     clean = scan(f"{ns}.clean")
     assert clean["records"] == expected_events

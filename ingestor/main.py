@@ -45,6 +45,8 @@ log = setup_logging("ingestor")
 SAVE_EVERY = 200
 SAVE_INTERVAL_SEC = 5.0
 MAX_BACKOFF_SEC = 60.0
+QUEUE_FULL_GIVE_UP_SEC = 60.0
+QUEUE_FULL_POLL_SEC = 0.5
 
 
 class DeliveryTracker:
@@ -120,18 +122,48 @@ class Ingestor:
             self._unsaved = 0
             self._last_save = now
 
-    def _send(self, topic: str, key: Optional[str], value: str, stream_id):
-        self.seq += 1
-        seq = self.seq
+    def _send(self, topic: str, key: Optional[str], value: str, stream_id) -> bool:
+        """Hand one message to the producer. Returns False if the ingestor gave up.
+
+        A full local queue means deliveries are not completing, usually because
+        the brokers are unreachable. Callbacks are served to make room and the
+        send is retried; if the queue stays full, the ingestor stops the same
+        way it does on a failed delivery, so the checkpoint stays before this
+        event and the next start reads it again.
+
+        The message joins the delivery tracker only once produce() has
+        accepted it. Registered first, a send that never happened would hold
+        the checkpoint behind it for good.
+        """
+        seq = self.seq + 1
+        waited_since = None
+        while True:
+            try:
+                self.producer.produce(
+                    topic,
+                    key=key.encode("utf-8") if key else None,
+                    value=value.encode("utf-8"),
+                    on_delivery=lambda err, msg, s=seq, sid=stream_id: self._on_delivery(
+                        err, msg, s, sid
+                    ),
+                )
+                break
+            except BufferError:
+                now = time.monotonic()
+                waited_since = waited_since or now
+                if now - waited_since >= QUEUE_FULL_GIVE_UP_SEC or not self.running:
+                    if self.failure is None:
+                        self.failure = "local queue full: Kafka is not accepting writes"
+                        log.error(
+                            "producer queue stayed full for %.0fs, stopping so no event is skipped",
+                            now - waited_since,
+                        )
+                    self.running = False
+                    return False
+                self.producer.poll(QUEUE_FULL_POLL_SEC)
+        self.seq = seq
         self.tracker.register(seq, stream_id)
-        self.producer.produce(
-            topic,
-            key=key.encode("utf-8") if key else None,
-            value=value.encode("utf-8"),
-            on_delivery=lambda err, msg, s=seq, sid=stream_id: self._on_delivery(
-                err, msg, s, sid
-            ),
-        )
+        return True
 
     def handle(self, event) -> None:
         if event.event == "error":

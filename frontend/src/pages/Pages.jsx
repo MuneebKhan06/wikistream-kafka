@@ -44,7 +44,7 @@ export function Pages() {
           <StatTile label="Pages in the snapshot" value={formatCount(snapshot.pages)} />
           <StatTile label="Records read" value={formatCount(snapshot.records_read)}
             detail="from the start of the topic" />
-          <StatTile label="Records per page" value={snapshot.records_per_page ?? "–"}
+          <StatTile label="Records per page" value={snapshot.records_per_page ?? "n/a"}
             detail="1.00 once fully compacted" />
           <StatTile label="Deletions applied" value={formatCount(snapshot.tombstones)} detail="tombstones" />
           <div className="stat">
@@ -140,9 +140,9 @@ export function Pages() {
                         <bdi>{page.user}</bdi>
                         {page.bot && <Badge kind="bot">bot</Badge>}
                       </td>
-                      <td className="right nowrap">{page.rev_id ?? "–"}</td>
+                      <td className="right nowrap">{page.rev_id ?? "n/a"}</td>
                       <td className="right nowrap">
-                        {page.length === null ? "–" : `${formatNumber(page.length)} B`}
+                        {page.length === null ? "n/a" : `${formatNumber(page.length)} B`}
                       </td>
                     </tr>
                   );

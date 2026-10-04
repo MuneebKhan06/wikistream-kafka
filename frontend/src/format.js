@@ -5,22 +5,22 @@ const whole = new Intl.NumberFormat("en");
 
 /** 1,284 below ten thousand; 12.9K and 4.2M above it. */
 export function formatCount(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "–";
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
   return Math.abs(value) >= 10000 ? compact.format(value) : whole.format(Math.round(value));
 }
 
 export function formatNumber(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "–";
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
   return whole.format(value);
 }
 
 export function formatPercent(fraction, digits = 0) {
-  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return "–";
+  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return "n/a";
   return `${(fraction * 100).toFixed(digits)}%`;
 }
 
 export function formatRate(perSecond) {
-  if (perSecond === null || perSecond === undefined) return "–";
+  if (perSecond === null || perSecond === undefined) return "n/a";
   return perSecond >= 100 ? whole.format(Math.round(perSecond)) : perSecond.toFixed(1);
 }
 
@@ -33,7 +33,7 @@ export function formatSizeChange(bytes) {
 }
 
 export function formatDuration(ms) {
-  if (ms === null || ms === undefined) return "–";
+  if (ms === null || ms === undefined) return "n/a";
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
   if (ms < 3600000) return `${Math.round(ms / 60000)} min`;

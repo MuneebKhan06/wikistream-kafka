@@ -13,7 +13,7 @@ describe("formatCount", () => {
     expect(formatCount(1284)).toBe("1,284");
     expect(formatCount(12900)).toBe("12.9K");
     expect(formatCount(4200000)).toBe("4.2M");
-    expect(formatCount(null)).toBe("–");
+    expect(formatCount(null)).toBe("n/a");
   });
 });
 
