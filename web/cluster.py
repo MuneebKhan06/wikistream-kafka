@@ -84,6 +84,40 @@ def group_lag(admin: AdminClient, group: str, topic: str, partitions: int, ends:
     }
 
 
+DLQ_COUNT_LIMIT = 100_000
+
+
+def count_records(topic: str, partitions: int, limit: int = DLQ_COUNT_LIMIT) -> int:
+    """Count the records a read_committed reader sees, by reading them.
+
+    Offsets cannot be subtracted for this: the cleaner writes the dead letter
+    queue in transactions, and every transaction leaves a commit marker that
+    takes an offset of its own, so end minus start counted each record twice.
+    The queue is small by design, and the answer is cached by the caller.
+    """
+    from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaError
+
+    from common.config import consumer_config
+
+    group = scoped("dashboard-dlq-count")
+    consumer = Consumer(consumer_config(group, **{"group.id": group, "enable.partition.eof": True}))
+    count, finished = 0, set()
+    try:
+        consumer.assign([TopicPartition(topic, p, OFFSET_BEGINNING) for p in range(partitions)])
+        while len(finished) < partitions and count < limit:
+            msg = consumer.poll(5)
+            if msg is None:
+                break
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    finished.add(msg.partition())
+                continue
+            count += 1
+    finally:
+        consumer.close()
+    return count
+
+
 def pipeline(admin: AdminClient) -> dict:
     metadata = admin.list_topics(timeout=TIMEOUT_SEC)
     cluster = admin.describe_cluster(request_timeout=TIMEOUT_SEC).result()
@@ -128,13 +162,9 @@ def pipeline(admin: AdminClient) -> dict:
             log.warning("could not read group %s: %s", group, exc)
             groups.append({"group": group, "topic": topic, "error": str(exc)})
 
-    dlq_records = 0
+    dlq_records = None
     if TOPIC_DLQ in partition_counts:
-        latest = end_offsets(admin, TOPIC_DLQ, partition_counts[TOPIC_DLQ])
-        earliest = end_offsets(
-            admin, TOPIC_DLQ, partition_counts[TOPIC_DLQ], OffsetSpec.earliest()
-        )
-        dlq_records = sum(latest[p] - earliest[p] for p in latest)
+        dlq_records = count_records(TOPIC_DLQ, partition_counts[TOPIC_DLQ])
 
     brokers = sorted(node.id for node in cluster.nodes)
     return {
