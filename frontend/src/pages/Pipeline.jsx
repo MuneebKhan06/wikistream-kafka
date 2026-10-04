@@ -217,8 +217,8 @@ export function Pipeline() {
                       <td>{shortGroup(g.group)}</td>
                       <td>{g.topic}</td>
                       <td>{g.error ? "unreadable" : g.state}</td>
-                      <td className="right">{g.members ?? "–"}</td>
-                      <td className="right">{g.error ? "–" : formatNumber(g.lag)}</td>
+                      <td className="right">{g.members ?? "n/a"}</td>
+                      <td className="right">{g.error ? "n/a" : formatNumber(g.lag)}</td>
                       <td className="secondary num">
                         {(g.partitions ?? []).map((p) => `p${p.partition} ${formatNumber(p.lag)}`).join(", ")}
                       </td>
